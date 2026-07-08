@@ -1,0 +1,27 @@
+<svg width="720" height="520" viewBox="0 0 720 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Line-art open book with a glowing letter</title>
+  <desc id="desc">A simple open book illustration with a small glowing letter above it.</desc>
+  <rect width="720" height="520" rx="36" fill="#F7FBFA"/>
+  <path d="M126 164C194 142 270 151 346 196V397C276 354 200 343 126 363V164Z" fill="#FFFFFF" stroke="#2F7D73" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M594 164C526 142 450 151 374 196V397C444 354 520 343 594 363V164Z" fill="#FFFFFF" stroke="#2F7D73" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M346 196C354 190 366 190 374 196V397C366 390 354 390 346 397V196Z" fill="#DDF2EE" stroke="#2F7D73" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M164 209C218 197 268 203 316 227" stroke="#8BBDB5" stroke-width="10" stroke-linecap="round"/>
+  <path d="M164 257C218 246 268 252 316 276" stroke="#8BBDB5" stroke-width="10" stroke-linecap="round"/>
+  <path d="M164 305C218 294 268 300 316 324" stroke="#8BBDB5" stroke-width="10" stroke-linecap="round"/>
+  <path d="M556 209C502 197 452 203 404 227" stroke="#8BBDB5" stroke-width="10" stroke-linecap="round"/>
+  <path d="M556 257C502 246 452 252 404 276" stroke="#8BBDB5" stroke-width="10" stroke-linecap="round"/>
+  <path d="M556 305C502 294 452 300 404 324" stroke="#8BBDB5" stroke-width="10" stroke-linecap="round"/>
+  <g filter="url(#glow)">
+    <path d="M360 70L392 152H369L363 135H329L323 152H300L332 70H360ZM335 116H357L346 85L335 116Z" fill="#63B3A7"/>
+  </g>
+  <path d="M286 96L274 108M434 96L446 108M360 38V54" stroke="#63B3A7" stroke-width="10" stroke-linecap="round"/>
+  <defs>
+    <filter id="glow" x="268" y="38" width="156" height="146" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.388 0 0 0 0 0.702 0 0 0 0 0.655 0 0 0 0.6 0"/>
+      <feBlend in2="BackgroundImageFix" result="effect"/>
+      <feBlend in="SourceGraphic" in2="effect" result="shape"/>
+    </filter>
+  </defs>
+</svg>

@@ -21,3 +21,11 @@ __pycache__/
 # Operating system
 .DS_Store
 Thumbs.db
+
+# Test/cache files
+.pytest_cache/
+coverage/
+htmlcov/
+
+# Logs
+*.log
