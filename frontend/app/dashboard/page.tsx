@@ -7,11 +7,22 @@ import { AssessmentStatusCard } from "@/components/assessment/AssessmentStatusCa
 import {
   getAssessmentResult,
   getAssessmentStatus,
+  isAuthenticationError,
 } from "@/lib/assessment/api";
+import {
+  getLearningPlan,
+  updateLessonProgress,
+} from "@/lib/learning/api";
 import type {
   AssessmentResult,
   AssessmentStatusResponse,
 } from "@/lib/assessment/types";
+import type {
+  LearningPlan,
+  ProgressStatus,
+  RecommendedLesson,
+  SkillType,
+} from "@/lib/learning/types";
 import {
   LANGUAGE_OPTIONS,
   LANGUAGE_STORAGE_KEY,
@@ -188,6 +199,10 @@ export default function Dashboard() {
   const [assessmentResult, setAssessmentResult] =
     useState<AssessmentResult | null>(null);
   const [assessmentError, setAssessmentError] = useState("");
+  const [learningPlan, setLearningPlan] = useState<LearningPlan | null>(null);
+  const [isLearningPlanLoading, setIsLearningPlanLoading] = useState(false);
+  const [learningPlanError, setLearningPlanError] = useState("");
+  const [updatingLessonId, setUpdatingLessonId] = useState<number | null>(null);
 
   const syncProfileForm = useCallback((nextProfile: UserProfile) => {
     setProfileForm({
@@ -299,10 +314,46 @@ export default function Dashboard() {
         }
       } catch (caught) {
         console.error(caught);
+        if (isAuthenticationError(caught)) {
+          setAssessmentError(t("profile.sessionExpired"));
+          handleUnauthorizedProfile();
+          return;
+        }
         setAssessmentError(t("assessment.statusError"));
       }
     },
     [handleUnauthorizedProfile, router, t],
+  );
+
+  const fetchLearningPlan = useCallback(
+    async (tokenOverride?: string) => {
+      const token = tokenOverride || localStorage.getItem("access_token");
+
+      if (!token) {
+        handleUnauthorizedProfile();
+        return;
+      }
+
+      setIsLearningPlanLoading(true);
+      setLearningPlanError("");
+
+      try {
+        const plan = await getLearningPlan(token);
+        setLearningPlan(plan);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "";
+        if (message.includes("assessment")) {
+          setLearningPlanError(t("learning.assessmentRequired"));
+        } else if (message.includes("Embedding model")) {
+          setLearningPlanError(t("learning.modelUnavailable"));
+        } else {
+          setLearningPlanError(t("learning.loadError"));
+        }
+      } finally {
+        setIsLearningPlanLoading(false);
+      }
+    },
+    [handleUnauthorizedProfile, t],
   );
 
   useEffect(() => {
@@ -331,9 +382,11 @@ export default function Dashboard() {
 
     queueMicrotask(() => {
       void fetchProfile(token);
-      void fetchAssessmentStatus(token).finally(() => setIsCheckingAuth(false));
+      void fetchAssessmentStatus(token)
+        .then(() => fetchLearningPlan(token))
+        .finally(() => setIsCheckingAuth(false));
     });
-  }, [fetchAssessmentStatus, fetchProfile, router, setLanguageFromValue]);
+  }, [fetchAssessmentStatus, fetchLearningPlan, fetchProfile, router, setLanguageFromValue]);
 
   const isDark = theme === "dark";
 
@@ -491,6 +544,180 @@ export default function Dashboard() {
     setStatusMessage(t("dashboard.prototypeMessage", { label }));
   }
 
+  function formatSkill(skill: SkillType) {
+    return t(`dashboard.${skill}` as TranslationKey);
+  }
+
+  function formatLevel(level: string) {
+    return t(`assessment.level.${level}` as TranslationKey);
+  }
+
+  function formatProgressStatus(status: ProgressStatus) {
+    if (status === "completed") {
+      return t("assessment.completed");
+    }
+    if (status === "in_progress") {
+      return t("assessment.inProgress");
+    }
+    return t("assessment.notCompleted");
+  }
+
+  async function handleLessonAction(lesson: RecommendedLesson) {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      handleUnauthorizedProfile();
+      return;
+    }
+
+    const nextStatus = lesson.current_progress_status === "not_started" ? "in_progress" : "completed";
+    const nextPercentage = nextStatus === "completed" ? 100 : 10;
+
+    setUpdatingLessonId(lesson.lesson_id);
+    setLearningPlanError("");
+    try {
+      await updateLessonProgress(token, lesson.lesson_id, nextStatus, nextPercentage);
+      await fetchLearningPlan(token);
+    } catch {
+      setLearningPlanError(t("learning.progressError"));
+    } finally {
+      setUpdatingLessonId(null);
+    }
+  }
+
+  function renderRecommendedLearningPath() {
+    if (isLearningPlanLoading) {
+      return (
+        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
+          <h2 className="text-lg font-semibold tracking-tight">
+            {t("learning.recommendedPath")}
+          </h2>
+          <p className={`mt-3 text-sm ${secondaryTextClass}`}>
+            {t("learning.loading")}
+          </p>
+        </section>
+      );
+    }
+
+    if (learningPlanError) {
+      return (
+        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
+          <h2 className="text-lg font-semibold tracking-tight">
+            {t("learning.recommendedPath")}
+          </h2>
+          <p className="mt-3 text-sm font-medium text-red-500">
+            {learningPlanError}
+          </p>
+          <button
+            type="button"
+            onClick={() => fetchLearningPlan()}
+            className={`mt-5 ${buttonClass}`}
+          >
+            {t("common.retry")}
+          </button>
+        </section>
+      );
+    }
+
+    if (!learningPlan || !learningPlan.recommended_lessons.length) {
+      return (
+        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
+          <h2 className="text-lg font-semibold tracking-tight">
+            {t("learning.recommendedPath")}
+          </h2>
+          <p className={`mt-3 text-sm ${secondaryTextClass}`}>
+            {t("learning.empty")}
+          </p>
+        </section>
+      );
+    }
+
+    return (
+      <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className={`text-sm font-semibold ${accentTextClass}`}>
+              {t("learning.recommendedPath")}
+            </p>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight">
+              {learningPlan.suggested_next_lesson?.title || t("learning.nextLesson")}
+            </h2>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            {[
+              [t("learning.weakestSkill"), formatSkill(learningPlan.weakest_skill)],
+              [t("assessment.currentLevel"), formatLevel(learningPlan.learner_proficiency_level)],
+              [
+                t("learning.completed"),
+                String(learningPlan.completion_summary.completed_lessons_count),
+              ],
+              [
+                t("learning.totalRecommended"),
+                String(learningPlan.completion_summary.total_recommended_lessons),
+              ],
+            ].map(([label, value]) => (
+              <div key={label} className={`rounded-xl px-3 py-2 ${mutedSurfaceClass}`}>
+                <p className={secondaryTextClass}>{label}</p>
+                <p className="mt-1 font-semibold">{value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {learningPlan.recommended_lessons.map((lesson) => (
+            <article
+              key={lesson.lesson_id}
+              className={`flex flex-col rounded-2xl border p-4 ${isDark ? "border-[#2B373B] bg-[#151D20]" : "border-[#DDE3E0] bg-white"}`}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold tracking-tight">
+                    {lesson.title}
+                  </h3>
+                  <p className={`mt-2 text-sm leading-6 ${secondaryTextClass}`}>
+                    {lesson.description}
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass} ${accentTextClass}`}>
+                  {formatProgressStatus(lesson.current_progress_status)}
+                </span>
+              </div>
+
+              <p className={`mt-3 text-sm leading-6 ${secondaryTextClass}`}>
+                {lesson.recommendation_reason}
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass}`}>
+                  {formatSkill(lesson.skill_type)}
+                </span>
+                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass}`}>
+                  {formatLevel(lesson.proficiency_level)}
+                </span>
+                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass}`}>
+                  {lesson.estimated_duration_minutes} min
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleLessonAction(lesson)}
+                disabled={updatingLessonId === lesson.lesson_id || lesson.current_progress_status === "completed"}
+                className={`mt-5 ${fullButtonClass} disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                {lesson.current_progress_status === "not_started"
+                  ? t("learning.startLesson")
+                  : lesson.current_progress_status === "in_progress"
+                    ? t("learning.markComplete")
+                    : t("assessment.completed")}
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   function renderSkillProgress() {
     return (
       <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
@@ -589,6 +816,8 @@ export default function Dashboard() {
             </button>
           </section>
         </div>
+
+        {renderRecommendedLearningPath()}
 
         <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
           <h2 className="text-lg font-semibold tracking-tight">
@@ -710,6 +939,7 @@ export default function Dashboard() {
           ))}
         </section>
         {renderSkillProgress()}
+        {renderRecommendedLearningPath()}
       </>
     );
   }

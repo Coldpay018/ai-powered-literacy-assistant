@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import relationship
 
 from database import Base
 
@@ -132,4 +133,90 @@ class AssessmentResult(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "assessment_version", name="uq_user_assessment_result"),
+    )
+
+
+class Course(Base):
+    __tablename__ = "courses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    language = Column(String(10), nullable=False, index=True)
+    proficiency_level = Column(String(30), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    lessons = relationship("Lesson", back_populates="course")
+
+    __table_args__ = (
+        UniqueConstraint("title", "language", "proficiency_level", name="uq_course_title_language_level"),
+        Index("ix_courses_language_level_active", "language", "proficiency_level", "is_active"),
+    )
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    skill_type = Column(String(30), nullable=False, index=True)
+    proficiency_level = Column(String(30), nullable=False, index=True)
+    language = Column(String(10), nullable=False, index=True)
+    difficulty_order = Column(Integer, nullable=False)
+    estimated_duration_minutes = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    course = relationship("Course", back_populates="lessons")
+    progress_records = relationship("LearnerProgress", back_populates="lesson")
+    recommendations = relationship("LessonRecommendation", back_populates="lesson")
+
+    __table_args__ = (
+        UniqueConstraint("course_id", "title", "language", name="uq_lesson_course_title_language"),
+        Index("ix_lessons_recommendation_lookup", "language", "proficiency_level", "skill_type", "is_active"),
+    )
+
+
+class LearnerProgress(Base):
+    __tablename__ = "learner_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id"), nullable=False, index=True)
+    status = Column(String(30), default="not_started", nullable=False, index=True)
+    progress_percentage = Column(Float, default=0, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+    lesson = relationship("Lesson", back_populates="progress_records")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "lesson_id", name="uq_learner_progress_user_lesson"),
+        Index("ix_learner_progress_user_status", "user_id", "status"),
+    )
+
+
+class LessonRecommendation(Base):
+    __tablename__ = "lesson_recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id"), nullable=False, index=True)
+    recommendation_score = Column(Float, nullable=False)
+    recommendation_reason = Column(Text, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    user = relationship("User")
+    lesson = relationship("Lesson", back_populates="recommendations")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "lesson_id", "generated_at", name="uq_recommendation_generation_lesson"),
+        Index("ix_recommendations_user_active", "user_id", "is_active"),
     )

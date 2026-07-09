@@ -1,7 +1,7 @@
 import type { LanguageCode } from "./types";
 
 const englishTranslations = {
-  "common.appName": "AI-Powered Literacy Assistant",
+  "common.appName": "MyOdyssey.ai",
   "common.platform": "Foundational Literacy Platform",
   "common.loading": "Loading...",
   "common.cancel": "Cancel",
@@ -116,6 +116,20 @@ const englishTranslations = {
   "dashboard.viewResource": "View Resource",
   "dashboard.prototypeMessage": "{label} is available as prototype dashboard content.",
 
+  "learning.recommendedPath": "Recommended Learning Path",
+  "learning.loading": "Loading your recommended lessons...",
+  "learning.empty": "No recommended lessons are available yet.",
+  "learning.loadError": "Unable to load your learning plan.",
+  "learning.progressError": "Unable to update lesson progress.",
+  "learning.assessmentRequired": "Complete the initial assessment to unlock lesson recommendations.",
+  "learning.modelUnavailable": "The recommendation model is not available. Check backend dependencies.",
+  "learning.weakestSkill": "Weakest skill",
+  "learning.completed": "Completed",
+  "learning.totalRecommended": "Recommended",
+  "learning.nextLesson": "Suggested next lesson",
+  "learning.startLesson": "Start",
+  "learning.markComplete": "Mark Complete",
+
   "profile.accountDetails": "Account Details",
   "profile.personalInformation": "Personal information",
   "profile.yourProfile": "Your profile",
@@ -195,7 +209,7 @@ export type TranslationKey = keyof typeof englishTranslations;
 export const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>> = {
   en: englishTranslations,
   hi: {
-    "common.appName": "एआई-संचालित साक्षरता सहायक",
+    "common.appName": "MyOdyssey.ai",
     "common.platform": "आधारभूत साक्षरता मंच",
     "common.loading": "लोड हो रहा है...",
     "common.cancel": "रद्द करें",
@@ -324,7 +338,7 @@ export const translations: Record<LanguageCode, Partial<Record<TranslationKey, s
     "profile.sessionStatus": "सत्र स्थिति",
   },
   ta: {
-    "common.appName": "ஏஐ இயங்கும் எழுத்தறிவு உதவியாளர்",
+    "common.appName": "MyOdyssey.ai",
     "common.platform": "அடிப்படை எழுத்தறிவு தளம்",
     "common.loading": "ஏற்றப்படுகிறது...",
     "common.cancel": "ரத்து செய்",
@@ -453,7 +467,7 @@ export const translations: Record<LanguageCode, Partial<Record<TranslationKey, s
     "profile.sessionStatus": "அமர்வு நிலை",
   },
   te: {
-    "common.appName": "ఏఐ ఆధారిత అక్షరాస్యత సహాయకుడు",
+    "common.appName": "MyOdyssey.ai",
     "common.platform": "ప్రాథమిక అక్షరాస్యత వేదిక",
     "common.loading": "లోడ్ అవుతోంది...",
     "common.cancel": "రద్దు",

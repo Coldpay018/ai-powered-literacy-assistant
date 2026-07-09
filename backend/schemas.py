@@ -7,6 +7,9 @@ from language_utils import normalize_language as normalize_language_value
 
 
 UserRole = Literal["learner", "educator", "administrator"]
+SkillType = Literal["reading", "writing", "comprehension"]
+ProficiencyLevel = Literal["beginner", "intermediate", "advanced"]
+ProgressStatus = Literal["not_started", "in_progress", "completed"]
 SUPPORTED_LANGUAGES = {"en", "hi", "ta", "te"}
 
 
@@ -172,3 +175,80 @@ class AssessmentResultResponse(BaseModel):
     mcq_score: float
     overall_score: float
     proficiency_level: str
+
+
+class CourseResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    language: str
+    proficiency_level: ProficiencyLevel
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LessonResponse(BaseModel):
+    id: int
+    course_id: int
+    title: str
+    description: str
+    content: str
+    skill_type: SkillType
+    proficiency_level: ProficiencyLevel
+    language: str
+    difficulty_order: int
+    estimated_duration_minutes: int
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LearnerProgressResponse(BaseModel):
+    id: int
+    user_id: int
+    lesson_id: int
+    status: ProgressStatus
+    progress_percentage: float
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    last_accessed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class LessonProgressUpdate(BaseModel):
+    status: Optional[ProgressStatus] = None
+    progress_percentage: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class RecommendedLessonResponse(BaseModel):
+    lesson_id: int
+    title: str
+    description: str
+    skill_type: SkillType
+    proficiency_level: ProficiencyLevel
+    language: str
+    estimated_duration_minutes: int
+    recommendation_score: float
+    recommendation_reason: str
+    current_progress_status: ProgressStatus
+
+
+class CompletionSummaryResponse(BaseModel):
+    completed_lessons_count: int
+    in_progress_lessons_count: int
+    total_recommended_lessons: int
+
+
+class PersonalizedLearningPlanResponse(BaseModel):
+    learner_proficiency_level: ProficiencyLevel
+    reading_score: float
+    writing_score: float
+    comprehension_score: float
+    weakest_skill: SkillType
+    recommended_lessons: list[RecommendedLessonResponse]
+    completion_summary: CompletionSummaryResponse
+    suggested_next_lesson: Optional[RecommendedLessonResponse] = None

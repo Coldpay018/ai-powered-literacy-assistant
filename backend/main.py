@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,19 +17,27 @@ from assessment_service import (
 from auth import create_access_token, decode_access_token, hash_password, verify_password
 from database import Base, SessionLocal, engine
 import models
+from recommendation_service import current_recommendations, generate_recommendations, learning_plan
 from schemas import (
     AssessmentAnswersRequest,
     AssessmentAttemptResponse,
     AssessmentResultResponse,
     AssessmentSaveResponse,
     AssessmentStatusResponse,
+    CourseResponse,
+    LearnerProgressResponse,
+    LessonProgressUpdate,
+    LessonResponse,
     LoginRequest,
+    PersonalizedLearningPlanResponse,
+    RecommendedLessonResponse,
     TokenResponse,
     UserCreate,
     UserResponse,
     UserUpdate,
 )
 from seed_assessment import seed_initial_assessment
+from seed_learning_content import seed_learning_content
 
 
 @asynccontextmanager
@@ -37,6 +46,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_initial_assessment(db)
+        seed_learning_content(db)
     finally:
         db.close()
     yield
@@ -213,3 +223,129 @@ def assessment_result(
     db: Session = Depends(get_db),
 ):
     return get_result(db, current_user)
+
+
+@app.get("/courses", response_model=list[CourseResponse])
+def list_courses(
+    language: str | None = None,
+    proficiency_level: str | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.Course).filter(models.Course.is_active == True)
+    if language:
+        query = query.filter(models.Course.language == language)
+    if proficiency_level:
+        query = query.filter(models.Course.proficiency_level == proficiency_level)
+    return query.order_by(models.Course.language, models.Course.proficiency_level, models.Course.title).all()
+
+
+@app.get("/lessons", response_model=list[LessonResponse])
+def list_lessons(
+    course: int | None = None,
+    skill_type: str | None = None,
+    proficiency_level: str | None = None,
+    language: str | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(models.Lesson).filter(models.Lesson.is_active == True)
+    if course is not None:
+        query = query.filter(models.Lesson.course_id == course)
+    if skill_type:
+        query = query.filter(models.Lesson.skill_type == skill_type)
+    if proficiency_level:
+        query = query.filter(models.Lesson.proficiency_level == proficiency_level)
+    if language:
+        query = query.filter(models.Lesson.language == language)
+    return query.order_by(models.Lesson.proficiency_level, models.Lesson.difficulty_order).all()
+
+
+@app.get("/recommendations/me", response_model=list[RecommendedLessonResponse])
+def recommendations_me(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    recommendations = current_recommendations(db, current_user)
+    if recommendations:
+        return recommendations
+    return generate_recommendations(db, current_user)
+
+
+@app.post("/recommendations/generate", response_model=list[RecommendedLessonResponse])
+def recommendations_generate(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return generate_recommendations(db, current_user)
+
+
+@app.patch("/lessons/{lesson_id}/progress", response_model=LearnerProgressResponse)
+def update_lesson_progress(
+    lesson_id: int,
+    request: LessonProgressUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    lesson = (
+        db.query(models.Lesson)
+        .filter(models.Lesson.id == lesson_id, models.Lesson.is_active == True)
+        .first()
+    )
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if request.status is None and request.progress_percentage is None:
+        raise HTTPException(status_code=422, detail="Progress update is empty")
+
+    progress = (
+        db.query(models.LearnerProgress)
+        .filter(
+            models.LearnerProgress.user_id == current_user.id,
+            models.LearnerProgress.lesson_id == lesson_id,
+        )
+        .first()
+    )
+    if not progress:
+        progress = models.LearnerProgress(
+            user_id=current_user.id,
+            lesson_id=lesson_id,
+            status="not_started",
+            progress_percentage=0,
+        )
+        db.add(progress)
+
+    now = datetime.now(timezone.utc)
+    if request.status is not None:
+        progress.status = request.status
+    if request.progress_percentage is not None:
+        progress.progress_percentage = request.progress_percentage
+
+    if progress.status == "completed":
+        progress.progress_percentage = 100
+        progress.completed_at = progress.completed_at or now
+        progress.started_at = progress.started_at or now
+    elif progress.status == "in_progress":
+        progress.started_at = progress.started_at or now
+        progress.completed_at = None
+        if progress.progress_percentage <= 0:
+            progress.progress_percentage = 1
+    elif progress.status == "not_started":
+        progress.progress_percentage = 0
+        progress.started_at = None
+        progress.completed_at = None
+
+    if progress.progress_percentage == 100:
+        progress.status = "completed"
+        progress.completed_at = progress.completed_at or now
+        progress.started_at = progress.started_at or now
+
+    progress.last_accessed_at = now
+    db.commit()
+    db.refresh(progress)
+    return progress
+
+
+@app.get("/learning-plan/me", response_model=PersonalizedLearningPlanResponse)
+def learning_plan_me(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return learning_plan(db, current_user)
