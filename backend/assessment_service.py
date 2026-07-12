@@ -154,7 +154,7 @@ def start_or_resume(db: Session, user: models.User):
         return serialize_attempt(db, existing)
 
     assessment = get_initial_assessment(db)
-    language = normalize_language(user.preferred_language)
+    language = normalize_language(user.learning_language)
     attempt = models.AssessmentAttempt(
         user_id=user.id,
         assessment_id=assessment.id,

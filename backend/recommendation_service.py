@@ -93,7 +93,7 @@ def _learner_needs_text(result: models.AssessmentResult, user: models.User, skil
         f"An {result.proficiency_level} learner with weakest skill in {skill_profile.weakest_skill}. "
         f"Needs lessons for {weak_descriptions}. "
         f"Reading score: {result.reading_score:g}, writing score: {result.typing_score:g}, "
-        f"comprehension score: {result.mcq_score:g}. Preferred language: {user.preferred_language}."
+        f"comprehension score: {result.mcq_score:g}. Learning language: {user.learning_language}."
     )
 
 
@@ -185,7 +185,7 @@ def generate_recommendations(db: Session, user: models.User, limit: int = 6) -> 
     skill_profile = get_skill_profile(result)
     progress = _progress_by_lesson(db, user.id)
     completed_lesson_ids = {lesson_id for lesson_id, row in progress.items() if row.status == "completed"}
-    lessons = [lesson for lesson in _available_lessons(db, result, user.preferred_language) if lesson.id not in completed_lesson_ids]
+    lessons = [lesson for lesson in _available_lessons(db, result, user.learning_language) if lesson.id not in completed_lesson_ids]
     if not lessons:
         raise HTTPException(status_code=404, detail="No suitable lessons are available")
 
@@ -197,7 +197,7 @@ def generate_recommendations(db: Session, user: models.User, limit: int = 6) -> 
         skill_gap = (100.0 - skill_profile.scores[lesson.skill_type]) / 100.0
         skill_bonus = 0.18 if lesson.skill_type == skill_profile.weakest_skill else 0.07 * skill_gap
         level_bonus = 0.10 if lesson.proficiency_level == result.proficiency_level else 0.0
-        language_bonus = 0.05 if lesson.language == user.preferred_language else 0.0
+        language_bonus = 0.05 if lesson.language == user.learning_language else 0.0
         progress_penalty = 0.08 if progress.get(lesson.id) and progress[lesson.id].status == "in_progress" else 0.0
         # Ranking formula: semantic similarity from MiniLM is the base signal.
         # Small deterministic modifiers then prioritize the learner's weakest skill,

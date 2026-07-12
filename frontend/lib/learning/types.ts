@@ -29,3 +29,122 @@ export type LearningPlan = {
   };
   suggested_next_lesson: RecommendedLesson | null;
 };
+
+export type LessonContentBlock = {
+  id: number;
+  lesson_id: number;
+  content_type:
+    | "text"
+    | "image"
+    | "video"
+    | "audio"
+    | "flashcard"
+    | "matching"
+    | "drag_drop"
+    | "fill_blank"
+    | "sequence"
+    | "read_aloud"
+    | "dictation"
+    | "quiz";
+  title: string;
+  text_content: string | null;
+  content_url: string | null;
+  sequence_order: number;
+  metadata: Record<string, unknown> | null;
+  is_required: boolean;
+};
+
+export type LessonQuestion = {
+  id: number;
+  lesson_id: number;
+  content_block_id: number | null;
+  question_text: string;
+  question_type: "mcq" | "true_false" | "short_answer" | "fill_blank" | "matching" | "sequence";
+  explanation: string | null;
+  sequence_order: number;
+  points: number;
+  options: Array<{
+    id: number;
+    option_text: string;
+    sequence_order: number;
+  }>;
+};
+
+export type LearnerProgress = {
+  id: number;
+  user_id: number;
+  course_id: number | null;
+  module_id: number | null;
+  lesson_id: number;
+  completion_status: ProgressStatus;
+  status: ProgressStatus;
+  progress_percentage: number;
+  last_content_block_id: number | null;
+  questions_attempted: number;
+  correct_answers: number;
+  incorrect_answers: number;
+  current_difficulty: ProficiencyLevel | null;
+  score: number;
+  best_quiz_score: number | null;
+  attempt_count: number;
+  time_spent_seconds: number;
+  time_spent: number;
+  started_at: string | null;
+  completed_at: string | null;
+  last_accessed_at: string | null;
+};
+
+export type LessonNavigationItem = {
+  id: number;
+  title: string;
+  status: ProgressStatus;
+  locked: boolean;
+};
+
+export type LessonPlayer = {
+  id: number;
+  course_id: number;
+  module_id: number | null;
+  title: string;
+  description: string;
+  skill: SkillType;
+  skill_type: SkillType;
+  difficulty_level: ProficiencyLevel;
+  proficiency_level: ProficiencyLevel;
+  language: string;
+  estimated_minutes: number;
+  estimated_duration_minutes: number;
+  sequence_order: number;
+  difficulty_order: number;
+  xp_reward: number;
+  content_blocks: LessonContentBlock[];
+  questions: LessonQuestion[];
+  progress: LearnerProgress | null;
+  locked: boolean;
+  lock_reason: string | null;
+  previous_lesson: LessonNavigationItem | null;
+  next_lesson: LessonNavigationItem | null;
+};
+
+export type LessonQuizSubmitResponse = {
+  score: number;
+  total_points: number;
+  correct_answers: number;
+  total_questions: number;
+  passed: boolean;
+  progress: LearnerProgress;
+  results: Array<{
+    question_id: number;
+    correct: boolean;
+    correct_answer: string | null;
+    explanation: string | null;
+    points_awarded: number;
+    points: number;
+  }>;
+};
+
+export type ProgressRecord = LearnerProgress & {
+  lesson_title?: string;
+  course_title?: string;
+  module_title?: string;
+};

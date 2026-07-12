@@ -9,6 +9,7 @@ import { AssessmentReview } from "@/components/assessment/AssessmentReview";
 import { AssessmentResult } from "@/components/assessment/AssessmentResult";
 import { AssessmentSection } from "@/components/assessment/AssessmentSection";
 import {
+  isAuthenticationError,
   getAssessmentResult,
   getAssessmentStatus,
   saveAssessmentAnswers,
@@ -21,11 +22,16 @@ import type {
   AssessmentResult as AssessmentResultType,
 } from "@/lib/assessment/types";
 import { validateQuestion } from "@/lib/assessment/validation";
-import { LANGUAGE_STORAGE_KEY } from "@/lib/i18n/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import { API_BASE_URL } from "@/lib/api/config";
 
 type Theme = "light" | "dark";
 type Stage = "intro" | "question" | "review" | "result";
+type UserProfile = {
+  comfortable_language?: string;
+  learning_language?: string;
+  profile_complete?: boolean;
+};
 
 export default function InitialAssessmentPage() {
   const router = useRouter();
@@ -67,18 +73,64 @@ export default function InitialAssessmentPage() {
         if (status.has_in_progress_attempt) {
           const resumed = await startAssessment(authToken);
           setAttempt(resumed);
-          setLanguageFromValue(resumed.language);
           setAnswers(resumed.answers || {});
           setStage("question");
         }
       } catch (caught) {
         console.error(caught);
+        if (isAuthenticationError(caught)) {
+          resetLanguage();
+          router.replace("/login");
+          return;
+        }
         setError(t("assessment.loadError"));
       } finally {
         setLoading(false);
       }
     },
-    [router, setLanguageFromValue, t],
+    [resetLanguage, router, t],
+  );
+
+  const loadProfileLanguage = useCallback(
+    async (authToken: string) => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/users/me`, {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        });
+
+        if (response.status === 401 || response.status === 403) {
+          localStorage.removeItem("access_token");
+          resetLanguage();
+          router.replace("/login");
+          return false;
+        }
+
+        if (!response.ok) {
+          setError(t("profile.loadError"));
+          return false;
+        }
+
+        const user = (await response.json()) as UserProfile;
+        const resolvedUiLanguage = setLanguageFromValue(user.comfortable_language);
+        console.log({
+          comfortableLanguage: user.comfortable_language,
+          learningLanguage: user.learning_language,
+          appliedUiLanguage: resolvedUiLanguage,
+        });
+        if (!user.profile_complete) {
+          router.replace("/dashboard");
+          return false;
+        }
+        return true;
+      } catch (caught) {
+        console.error(caught);
+        setError(t("profile.loadError"));
+        return false;
+      }
+    },
+    [resetLanguage, router, setLanguageFromValue, t],
   );
 
   useEffect(() => {
@@ -91,11 +143,9 @@ export default function InitialAssessmentPage() {
           : "light";
 
     const authToken = localStorage.getItem("access_token");
-    const storedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
 
     queueMicrotask(() => {
       setTheme(resolvedTheme);
-      setLanguageFromValue(storedLanguage);
       if (authToken) {
         setToken(authToken);
       }
@@ -108,9 +158,14 @@ export default function InitialAssessmentPage() {
     }
 
     queueMicrotask(() => {
-      void loadStatus(authToken);
+      void loadProfileLanguage(authToken).then((loadedProfile) => {
+        if (loadedProfile) {
+          return loadStatus(authToken);
+        }
+        setLoading(false);
+      });
     });
-  }, [loadStatus, resetLanguage, router, setLanguageFromValue]);
+  }, [loadProfileLanguage, loadStatus, resetLanguage, router]);
 
   const sections = useMemo(() => attempt?.sections || [], [attempt]);
   const currentSection = sections[sectionIndex];
@@ -156,13 +211,17 @@ export default function InitialAssessmentPage() {
     try {
       const started = await startAssessment(token);
       setAttempt(started);
-      setLanguageFromValue(started.language);
       setAnswers(started.answers || {});
       setStage("question");
-    } catch (caught) {
-      console.error(caught);
-      setError(t("assessment.startError"));
-    } finally {
+      } catch (caught) {
+        console.error(caught);
+        if (isAuthenticationError(caught)) {
+          resetLanguage();
+          router.replace("/login");
+          return;
+        }
+        setError(t("assessment.startError"));
+      } finally {
       setIsStarting(false);
     }
   }

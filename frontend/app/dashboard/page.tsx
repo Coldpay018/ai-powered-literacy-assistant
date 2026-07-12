@@ -3,35 +3,42 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLanguage } from "@/components/LanguageProvider";
-import { AssessmentStatusCard } from "@/components/assessment/AssessmentStatusCard";
+import { AppShell } from "@/components/dashboard/AppShell";
+import { DashboardOverview } from "@/components/dashboard/DashboardOverview";
+import { LearningActivitiesSection } from "@/components/dashboard/LearningActivitiesSection";
+import { ProfileSection } from "@/components/dashboard/ProfileSection";
+import { ProgressSection } from "@/components/dashboard/ProgressSection";
+import { ResourcesSection } from "@/components/dashboard/ResourcesSection";
+import type {
+  ActiveSection,
+  DashboardPrototypeData,
+  ProfileForm,
+  UserProfile,
+} from "@/components/dashboard/types";
 import {
   getAssessmentResult,
   getAssessmentStatus,
   isAuthenticationError,
 } from "@/lib/assessment/api";
-import {
-  getLearningPlan,
-  updateLessonProgress,
-} from "@/lib/learning/api";
 import type {
   AssessmentResult,
   AssessmentStatusResponse,
 } from "@/lib/assessment/types";
+import {
+  getLearningPlan,
+  getProgressRecords,
+} from "@/lib/learning/api";
 import type {
   LearningPlan,
-  ProgressStatus,
+  ProgressRecord,
   RecommendedLesson,
-  SkillType,
 } from "@/lib/learning/types";
 import {
-  LANGUAGE_OPTIONS,
-  LANGUAGE_STORAGE_KEY,
+  clearStoredUiLanguage,
   normalizeLanguage,
-  type LanguageCode,
 } from "@/lib/i18n/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
-
-const API_BASE_URL = "http://127.0.0.1:8000";
+import { API_BASE_URL } from "@/lib/api/config";
 
 const navItems = [
   { id: "dashboard", labelKey: "common.dashboard" },
@@ -39,30 +46,9 @@ const navItems = [
   { id: "progress", labelKey: "common.progress" },
   { id: "resources", labelKey: "common.resources" },
   { id: "profile", labelKey: "common.profile" },
-] as const;
+] as const satisfies ReadonlyArray<{ id: ActiveSection; labelKey: TranslationKey }>;
 
-type ActiveSection = (typeof navItems)[number]["id"];
 type Theme = "light" | "dark";
-
-type UserProfile = {
-  id: number;
-  full_name: string;
-  age: number;
-  email: string;
-  preferred_language: string;
-  education_level: string;
-  role: string;
-  is_active: boolean;
-  created_at: string;
-};
-
-type ProfileForm = {
-  full_name: string;
-  age: string;
-  email: string;
-  preferred_language: LanguageCode;
-  education_level: string;
-};
 
 type ApiErrorDetail = string | { msg?: string }[] | { msg?: string };
 
@@ -92,7 +78,7 @@ async function readErrorMessage(response: Response) {
   return "";
 }
 
-const prototypeDashboardData = {
+const prototypeDashboardData: DashboardPrototypeData = {
   summaryCards: [
     {
       labelKey: "dashboard.activitiesCompleted",
@@ -127,50 +113,40 @@ const prototypeDashboardData = {
       descriptionKey: "dashboard.readAndMatchDescription",
       difficultyKey: "dashboard.beginner",
       duration: "12 min",
+      category: "reading",
     },
     {
       titleKey: "dashboard.soundBuilder",
       descriptionKey: "dashboard.soundBuilderDescription",
       difficultyKey: "dashboard.beginner",
       duration: "10 min",
+      category: "vocabulary",
     },
     {
       titleKey: "dashboard.sentenceSteps",
       descriptionKey: "dashboard.sentenceStepsDescription",
       difficultyKey: "dashboard.intermediate",
       duration: "15 min",
+      category: "writing",
     },
   ],
   resources: [
     {
       titleKey: "dashboard.dailyReadingPractice",
       descriptionKey: "dashboard.dailyReadingPracticeDescription",
+      type: "Practice",
     },
     {
       titleKey: "dashboard.vocabularyWordBank",
       descriptionKey: "dashboard.vocabularyWordBankDescription",
+      type: "Word Bank",
     },
     {
       titleKey: "dashboard.writingPrompts",
       descriptionKey: "dashboard.writingPromptsDescription",
+      type: "Prompts",
     },
   ],
-} satisfies {
-  summaryCards: Array<{
-    labelKey: TranslationKey;
-    value?: string;
-    valueKey?: TranslationKey;
-    detailKey: TranslationKey;
-  }>;
-  skillProgress: Array<{ skillKey: TranslationKey; value: number }>;
-  recentActivities: TranslationKey[];
-  learningActivities: Array<{
-    titleKey: TranslationKey;
-    descriptionKey: TranslationKey;
-    difficultyKey: TranslationKey;
-    duration: string;
-  }>;
-  resources: Array<{ titleKey: TranslationKey; descriptionKey: TranslationKey }>;
 };
 
 export default function Dashboard() {
@@ -186,7 +162,9 @@ export default function Dashboard() {
     full_name: "",
     age: "",
     email: "",
-    preferred_language: "en",
+    comfortable_language: "en",
+    learning_language: "hi",
+    experience_level: "Beginner",
     education_level: "",
   });
   const [isProfileLoading, setIsProfileLoading] = useState(true);
@@ -202,14 +180,23 @@ export default function Dashboard() {
   const [learningPlan, setLearningPlan] = useState<LearningPlan | null>(null);
   const [isLearningPlanLoading, setIsLearningPlanLoading] = useState(false);
   const [learningPlanError, setLearningPlanError] = useState("");
-  const [updatingLessonId, setUpdatingLessonId] = useState<number | null>(null);
+  const [updatingLessonId] = useState<number | null>(null);
+  const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
+  const [isProgressLoading, setIsProgressLoading] = useState(false);
+  const [progressError, setProgressError] = useState("");
 
   const syncProfileForm = useCallback((nextProfile: UserProfile) => {
     setProfileForm({
       full_name: nextProfile.full_name,
       age: String(nextProfile.age),
       email: nextProfile.email,
-      preferred_language: normalizeLanguage(nextProfile.preferred_language),
+      comfortable_language: nextProfile.comfortable_language
+        ? normalizeLanguage(nextProfile.comfortable_language)
+        : "",
+      learning_language: nextProfile.learning_language
+        ? normalizeLanguage(nextProfile.learning_language)
+        : "",
+      experience_level: nextProfile.experience_level || "",
       education_level: nextProfile.education_level,
     });
   }, []);
@@ -217,7 +204,7 @@ export default function Dashboard() {
   const handleUnauthorizedProfile = useCallback(() => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("login_email");
-    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    clearStoredUiLanguage();
     resetLanguage();
     router.replace("/login");
   }, [resetLanguage, router]);
@@ -247,7 +234,7 @@ export default function Dashboard() {
 
       if (!token) {
         handleUnauthorizedProfile();
-        return;
+        return null;
       }
 
       setIsProfileLoading(true);
@@ -263,25 +250,29 @@ export default function Dashboard() {
         if (response.status === 401 || response.status === 403) {
           setProfileError(t("profile.sessionExpired"));
           handleUnauthorizedProfile();
-          return;
+          return null;
         }
 
         if (!response.ok) {
           setProfileError(mapApiError(await readErrorMessage(response)));
-          return;
+          return null;
         }
 
         const data = (await response.json()) as UserProfile;
-        const nextLanguage = setLanguageFromValue(data.preferred_language);
+        const resolvedUiLanguage = setLanguageFromValue(data.comfortable_language);
+        console.log({
+          comfortableLanguage: data.comfortable_language,
+          learningLanguage: data.learning_language,
+          appliedUiLanguage: resolvedUiLanguage,
+        });
         setProfile(data);
         setEmail(data.email);
         localStorage.setItem("login_email", data.email);
-        localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
         syncProfileForm(data);
+        return data;
       } catch {
-        setProfileError(
-          t("profile.loadError"),
-        );
+        setProfileError(t("profile.loadError"));
+        return null;
       } finally {
         setIsProfileLoading(false);
       }
@@ -356,6 +347,31 @@ export default function Dashboard() {
     [handleUnauthorizedProfile, t],
   );
 
+  const fetchProgressRecords = useCallback(
+    async (tokenOverride?: string) => {
+      const token = tokenOverride || localStorage.getItem("access_token");
+
+      if (!token) {
+        handleUnauthorizedProfile();
+        return;
+      }
+
+      setIsProgressLoading(true);
+      setProgressError("");
+
+      try {
+        const records = await getProgressRecords(token);
+        setProgressRecords(records);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "";
+        setProgressError(mapApiError(message));
+      } finally {
+        setIsProgressLoading(false);
+      }
+    },
+    [handleUnauthorizedProfile, mapApiError],
+  );
+
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
     const resolvedTheme =
@@ -367,8 +383,6 @@ export default function Dashboard() {
 
     const token = localStorage.getItem("access_token");
     const storedEmail = localStorage.getItem("login_email");
-    const storedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-
     if (!token) {
       router.replace("/login");
       return;
@@ -376,39 +390,24 @@ export default function Dashboard() {
 
     queueMicrotask(() => {
       setTheme(resolvedTheme);
-      setLanguageFromValue(storedLanguage);
       setEmail(storedEmail || "");
     });
 
     queueMicrotask(() => {
-      void fetchProfile(token);
-      void fetchAssessmentStatus(token)
-        .then(() => fetchLearningPlan(token))
+      void fetchProfile(token)
+        .then((nextProfile) => {
+          if (!nextProfile?.profile_complete) {
+            return null;
+          }
+          return Promise.all([
+            fetchAssessmentStatus(token),
+            fetchLearningPlan(token),
+            fetchProgressRecords(token),
+          ]).then(() => null);
+        })
         .finally(() => setIsCheckingAuth(false));
     });
-  }, [fetchAssessmentStatus, fetchLearningPlan, fetchProfile, router, setLanguageFromValue]);
-
-  const isDark = theme === "dark";
-
-  const pageClass = isDark
-    ? "min-h-screen bg-[#0F1517] text-[#F4F7F6]"
-    : "min-h-screen bg-[#F5F7F6] text-[#172033]";
-  const panelClass = isDark
-    ? "border-[#2B373B] bg-[#151D20] shadow-black/30"
-    : "border-[#DDE3E0] bg-white shadow-slate-900/5";
-  const elevatedClass = isDark
-    ? "border-[#2B373B] bg-[#1B2529] shadow-black/35"
-    : "border-[#DDE3E0] bg-white shadow-slate-900/5";
-  const mutedSurfaceClass = isDark ? "bg-[#202B2F]" : "bg-[#EEF3F1]";
-  const secondaryTextClass = isDark ? "text-[#A8B3B0]" : "text-[#667085]";
-  const accentTextClass = isDark ? "text-[#63B3A7]" : "text-[#2F7D73]";
-  const buttonClass = isDark
-    ? "h-11 rounded-xl bg-[#63B3A7] px-5 text-sm font-semibold text-[#0F1517] transition hover:bg-[#79C7BC]"
-    : "h-11 rounded-xl bg-[#2F7D73] px-5 text-sm font-semibold text-white transition hover:bg-[#25675F]";
-  const fullButtonClass = `${buttonClass} w-full`;
-  const inputClass = isDark
-    ? "mt-2 h-11 w-full rounded-xl border border-[#2B373B] bg-[#202B2F] px-3.5 text-sm text-[#F4F7F6] outline-none transition placeholder:text-[#6F7D80] focus:border-[#63B3A7] focus:ring-4 focus:ring-[#63B3A7]/20"
-    : "mt-2 h-11 w-full rounded-xl border border-[#DDE3E0] bg-white px-3.5 text-sm text-[#172033] outline-none transition placeholder:text-[#98A2B3] focus:border-[#2F7D73] focus:ring-4 focus:ring-[#2F7D73]/15";
+  }, [fetchAssessmentStatus, fetchLearningPlan, fetchProgressRecords, fetchProfile, router]);
 
   function beginProfileEdit() {
     if (profile) {
@@ -438,7 +437,9 @@ export default function Dashboard() {
     const updates: Partial<ProfileForm> = {};
     const trimmedFullName = profileForm.full_name.trim();
     const trimmedEmail = profileForm.email.trim();
-    const selectedPreferredLanguage = profileForm.preferred_language;
+    const selectedComfortableLanguage = profileForm.comfortable_language;
+    const selectedLearningLanguage = profileForm.learning_language;
+    const selectedExperienceLevel = profileForm.experience_level;
     const trimmedEducationLevel = profileForm.education_level.trim();
     const parsedAge = Number(profileForm.age);
 
@@ -460,8 +461,28 @@ export default function Dashboard() {
       updates.email = trimmedEmail;
     }
 
-    if (selectedPreferredLanguage !== normalizeLanguage(profile.preferred_language)) {
-      updates.preferred_language = selectedPreferredLanguage;
+    if (selectedComfortableLanguage === selectedLearningLanguage) {
+      setProfileError(t("profile.languagesMustDiffer"));
+      setProfileMessage("");
+      return;
+    }
+
+    if (!selectedComfortableLanguage || !selectedLearningLanguage || !selectedExperienceLevel) {
+      setProfileError(t("profile.completeRequired"));
+      setProfileMessage("");
+      return;
+    }
+
+    if (selectedComfortableLanguage !== normalizeLanguage(profile.comfortable_language)) {
+      updates.comfortable_language = selectedComfortableLanguage;
+    }
+
+    if (selectedLearningLanguage !== normalizeLanguage(profile.learning_language)) {
+      updates.learning_language = selectedLearningLanguage;
+    }
+
+    if (selectedExperienceLevel !== profile.experience_level) {
+      updates.experience_level = selectedExperienceLevel;
     }
 
     if (trimmedEducationLevel !== profile.education_level) {
@@ -469,9 +490,14 @@ export default function Dashboard() {
     }
 
     if (!Object.keys(updates).length) {
-      setProfileMessage(t("profile.noChanges"));
-      setIsEditingProfile(false);
-      return;
+      if (profile.profile_complete) {
+        setProfileMessage(t("profile.noChanges"));
+        setIsEditingProfile(false);
+        return;
+      }
+      updates.comfortable_language = selectedComfortableLanguage;
+      updates.learning_language = selectedLearningLanguage;
+      updates.experience_level = selectedExperienceLevel;
     }
 
     const token = localStorage.getItem("access_token");
@@ -510,15 +536,24 @@ export default function Dashboard() {
       }
 
       const data = (await response.json()) as UserProfile;
-      const nextLanguage = setLanguageFromValue(data.preferred_language);
+      const resolvedUiLanguage = setLanguageFromValue(data.comfortable_language);
+      console.log({
+        comfortableLanguage: data.comfortable_language,
+        learningLanguage: data.learning_language,
+        appliedUiLanguage: resolvedUiLanguage,
+      });
       setProfile(data);
       setEmail(data.email);
       localStorage.setItem("login_email", data.email);
-      localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
       syncProfileForm(data);
       setIsEditingProfile(false);
       setProfileMessage(t("profile.updated"));
-      await fetchProfile(token);
+      const nextProfile = await fetchProfile(token);
+      if (nextProfile?.profile_complete) {
+        await fetchAssessmentStatus(token);
+        await fetchLearningPlan(token);
+        await fetchProgressRecords(token);
+      }
     } catch {
       setProfileError(t("profile.saveError"));
     } finally {
@@ -535,7 +570,7 @@ export default function Dashboard() {
   function handleLogout() {
     localStorage.removeItem("access_token");
     localStorage.removeItem("login_email");
-    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    clearStoredUiLanguage();
     resetLanguage();
     router.replace("/login");
   }
@@ -544,22 +579,8 @@ export default function Dashboard() {
     setStatusMessage(t("dashboard.prototypeMessage", { label }));
   }
 
-  function formatSkill(skill: SkillType) {
-    return t(`dashboard.${skill}` as TranslationKey);
-  }
-
   function formatLevel(level: string) {
     return t(`assessment.level.${level}` as TranslationKey);
-  }
-
-  function formatProgressStatus(status: ProgressStatus) {
-    if (status === "completed") {
-      return t("assessment.completed");
-    }
-    if (status === "in_progress") {
-      return t("assessment.inProgress");
-    }
-    return t("assessment.notCompleted");
   }
 
   async function handleLessonAction(lesson: RecommendedLesson) {
@@ -568,796 +589,195 @@ export default function Dashboard() {
       handleUnauthorizedProfile();
       return;
     }
-
-    const nextStatus = lesson.current_progress_status === "not_started" ? "in_progress" : "completed";
-    const nextPercentage = nextStatus === "completed" ? 100 : 10;
-
-    setUpdatingLessonId(lesson.lesson_id);
-    setLearningPlanError("");
-    try {
-      await updateLessonProgress(token, lesson.lesson_id, nextStatus, nextPercentage);
-      await fetchLearningPlan(token);
-    } catch {
-      setLearningPlanError(t("learning.progressError"));
-    } finally {
-      setUpdatingLessonId(null);
-    }
+    router.push(`/lessons/${lesson.lesson_id}`);
   }
 
-  function renderRecommendedLearningPath() {
-    if (isLearningPlanLoading) {
-      return (
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t("learning.recommendedPath")}
-          </h2>
-          <p className={`mt-3 text-sm ${secondaryTextClass}`}>
-            {t("learning.loading")}
-          </p>
-        </section>
-      );
-    }
-
-    if (learningPlanError) {
-      return (
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t("learning.recommendedPath")}
-          </h2>
-          <p className="mt-3 text-sm font-medium text-red-500">
-            {learningPlanError}
-          </p>
-          <button
-            type="button"
-            onClick={() => fetchLearningPlan()}
-            className={`mt-5 ${buttonClass}`}
-          >
-            {t("common.retry")}
-          </button>
-        </section>
-      );
-    }
-
-    if (!learningPlan || !learningPlan.recommended_lessons.length) {
-      return (
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t("learning.recommendedPath")}
-          </h2>
-          <p className={`mt-3 text-sm ${secondaryTextClass}`}>
-            {t("learning.empty")}
-          </p>
-        </section>
-      );
-    }
-
-    return (
-      <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className={`text-sm font-semibold ${accentTextClass}`}>
-              {t("learning.recommendedPath")}
-            </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight">
-              {learningPlan.suggested_next_lesson?.title || t("learning.nextLesson")}
-            </h2>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            {[
-              [t("learning.weakestSkill"), formatSkill(learningPlan.weakest_skill)],
-              [t("assessment.currentLevel"), formatLevel(learningPlan.learner_proficiency_level)],
-              [
-                t("learning.completed"),
-                String(learningPlan.completion_summary.completed_lessons_count),
-              ],
-              [
-                t("learning.totalRecommended"),
-                String(learningPlan.completion_summary.total_recommended_lessons),
-              ],
-            ].map(([label, value]) => (
-              <div key={label} className={`rounded-xl px-3 py-2 ${mutedSurfaceClass}`}>
-                <p className={secondaryTextClass}>{label}</p>
-                <p className="mt-1 font-semibold">{value}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {learningPlan.recommended_lessons.map((lesson) => (
-            <article
-              key={lesson.lesson_id}
-              className={`flex flex-col rounded-2xl border p-4 ${isDark ? "border-[#2B373B] bg-[#151D20]" : "border-[#DDE3E0] bg-white"}`}
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h3 className="text-base font-semibold tracking-tight">
-                    {lesson.title}
-                  </h3>
-                  <p className={`mt-2 text-sm leading-6 ${secondaryTextClass}`}>
-                    {lesson.description}
-                  </p>
-                </div>
-                <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass} ${accentTextClass}`}>
-                  {formatProgressStatus(lesson.current_progress_status)}
-                </span>
-              </div>
-
-              <p className={`mt-3 text-sm leading-6 ${secondaryTextClass}`}>
-                {lesson.recommendation_reason}
-              </p>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass}`}>
-                  {formatSkill(lesson.skill_type)}
-                </span>
-                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass}`}>
-                  {formatLevel(lesson.proficiency_level)}
-                </span>
-                <span className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass}`}>
-                  {lesson.estimated_duration_minutes} min
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleLessonAction(lesson)}
-                disabled={updatingLessonId === lesson.lesson_id || lesson.current_progress_status === "completed"}
-                className={`mt-5 ${fullButtonClass} disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                {lesson.current_progress_status === "not_started"
-                  ? t("learning.startLesson")
-                  : lesson.current_progress_status === "in_progress"
-                    ? t("learning.markComplete")
-                    : t("assessment.completed")}
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  function renderSkillProgress() {
-    return (
-      <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-        <div className="mb-5">
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t("dashboard.skillProgress")}
-          </h2>
-          <p className={`mt-1 text-sm ${secondaryTextClass}`}>
-            {t("dashboard.skillProgressHelp")}
-          </p>
-        </div>
-
-        <div className="space-y-5">
-          {prototypeDashboardData.skillProgress.map((item) => (
-            <div key={item.skillKey}>
-              <div className="mb-2 flex items-center justify-between gap-4">
-                <p className="text-sm font-semibold">{t(item.skillKey)}</p>
-                <p className={`text-sm ${secondaryTextClass}`}>{item.value}%</p>
-              </div>
-              <div className={`h-3 rounded-full ${mutedSurfaceClass}`}>
-                <div
-                  className={`h-3 rounded-full ${
-                    isDark ? "bg-[#63B3A7]" : "bg-[#2F7D73]"
-                  }`}
-                  style={{ width: `${item.value}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  function renderDashboardSection() {
-    return (
-      <>
-        <AssessmentStatusCard
-          status={assessmentStatus}
-          result={assessmentResult}
-          onStart={() => router.push("/assessment")}
-          onViewResult={() => setActiveSection("progress")}
-          isDark={isDark}
-          t={t}
-        />
-
-        {assessmentError ? (
-          <div className={`rounded-2xl border px-4 py-3 text-sm font-medium text-red-500 ${elevatedClass}`}>
-            {assessmentError}
-          </div>
-        ) : null}
-
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {prototypeDashboardData.summaryCards.map((card) => (
-            <article
-              key={card.labelKey}
-              className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}
-            >
-              <p className={`text-sm font-medium ${secondaryTextClass}`}>
-                {t(card.labelKey)}
-              </p>
-              <p className="mt-3 text-3xl font-semibold tracking-tight">
-                {card.valueKey ? t(card.valueKey) : card.value}
-              </p>
-              <p className={`mt-2 text-sm ${accentTextClass}`}>
-                {t(card.detailKey)}
-              </p>
-            </article>
-          ))}
-        </section>
-
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
-          {renderSkillProgress()}
-
-          <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-            <p className={`text-sm font-semibold ${accentTextClass}`}>
-              {t("dashboard.recommendedActivity")}
-            </p>
-            <h2 className="mt-3 text-xl font-semibold tracking-tight">
-              {t("dashboard.readAndMatch")}
-            </h2>
-            <p className={`mt-3 text-sm leading-6 ${secondaryTextClass}`}>
-              {t("dashboard.readAndMatchDescription")}
-            </p>
-            <div
-              className={`mt-4 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass} ${accentTextClass}`}
-            >
-              {t("dashboard.beginner")} · 12 min
-            </div>
-            <button
-              type="button"
-              onClick={() => showPrototypeMessage(t("dashboard.readAndMatch"))}
-              className={`mt-6 ${fullButtonClass}`}
-            >
-              {t("dashboard.startActivity")}
-            </button>
-          </section>
-        </div>
-
-        {renderRecommendedLearningPath()}
-
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <h2 className="text-lg font-semibold tracking-tight">
-            {t("dashboard.recentActivity")}
-          </h2>
-          <div className={`mt-4 divide-y ${isDark ? "divide-[#2B373B]" : "divide-[#DDE3E0]"}`}>
-            {prototypeDashboardData.recentActivities.map((activity, index) => (
-              <div
-                key={activity}
-                className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <p className="text-sm font-medium">{t(activity)}</p>
-                <p className={`text-sm ${secondaryTextClass}`}>
-                  {t("dashboard.sessionCompleted", { number: index + 1 })}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-      </>
-    );
-  }
-
-  function renderLearningActivitiesSection() {
-    return (
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {prototypeDashboardData.learningActivities.map((activity) => (
-          <article
-            key={activity.titleKey}
-            className={`flex flex-col rounded-2xl border p-5 shadow-xl ${elevatedClass}`}
-          >
-            <h2 className="text-lg font-semibold tracking-tight">
-              {t(activity.titleKey)}
-            </h2>
-            <p className={`mt-3 flex-1 text-sm leading-6 ${secondaryTextClass}`}>
-              {t(activity.descriptionKey)}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <span
-                className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass} ${accentTextClass}`}
-              >
-                {t(activity.difficultyKey)}
-              </span>
-              <span
-                className={`rounded-full px-3 py-1 text-sm font-semibold ${mutedSurfaceClass} ${secondaryTextClass}`}
-              >
-                {activity.duration}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => showPrototypeMessage(t(activity.titleKey))}
-              className={`mt-6 ${fullButtonClass}`}
-            >
-              {t("dashboard.start")}
-            </button>
-          </article>
-        ))}
-      </section>
-    );
-  }
-
-  function renderProgressSection() {
-    return (
-      <>
-        <AssessmentStatusCard
-          status={assessmentStatus}
-          result={assessmentResult}
-          onStart={() => router.push("/assessment")}
-          isDark={isDark}
-          t={t}
-        />
-
-        {assessmentResult ? (
-          <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-            <h2 className="text-lg font-semibold tracking-tight">
-              {t("assessment.result")}
-            </h2>
-            <div className={`mt-4 divide-y ${isDark ? "divide-[#2B373B]" : "divide-[#DDE3E0]"}`}>
-              {[
-                [t("assessment.readingScore"), `${assessmentResult.reading_score}%`],
-                [t("assessment.typingScore"), `${assessmentResult.typing_score}%`],
-                [t("assessment.mcqScore"), `${assessmentResult.mcq_score}%`],
-                [t("assessment.overallScore"), `${assessmentResult.overall_score}%`],
-                [
-                  t("assessment.currentLevel"),
-                  t(`assessment.level.${assessmentResult.proficiency_level}` as TranslationKey),
-                ],
-                [
-                  t("assessment.completedOn"),
-                  new Date(assessmentResult.completed_at).toLocaleDateString(),
-                ],
-              ].map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-4 py-3 text-sm">
-                  <span className={secondaryTextClass}>{label}</span>
-                  <span className="font-semibold">{value}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {prototypeDashboardData.summaryCards.map((card) => (
-            <article
-              key={card.labelKey}
-              className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}
-            >
-              <p className={`text-sm font-medium ${secondaryTextClass}`}>
-                {t(card.labelKey)}
-              </p>
-              <p className="mt-3 text-3xl font-semibold tracking-tight">
-                {card.valueKey ? t(card.valueKey) : card.value}
-              </p>
-              <p className={`mt-2 text-sm ${accentTextClass}`}>
-                {t("common.prototypeData")}
-              </p>
-            </article>
-          ))}
-        </section>
-        {renderSkillProgress()}
-        {renderRecommendedLearningPath()}
-      </>
-    );
-  }
-
-  function renderResourcesSection() {
-    return (
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {prototypeDashboardData.resources.map((resource) => (
-          <article
-            key={resource.titleKey}
-            className={`flex flex-col rounded-2xl border p-5 shadow-xl ${elevatedClass}`}
-          >
-            <h2 className="text-lg font-semibold tracking-tight">
-              {t(resource.titleKey)}
-            </h2>
-            <p className={`mt-3 flex-1 text-sm leading-6 ${secondaryTextClass}`}>
-              {t(resource.descriptionKey)}
-            </p>
-            <button
-              type="button"
-              onClick={() => showPrototypeMessage(t(resource.titleKey))}
-              className={`mt-6 ${fullButtonClass}`}
-            >
-              {t("dashboard.viewResource")}
-            </button>
-          </article>
-        ))}
-      </section>
-    );
-  }
-
-  function renderProfileSection() {
-    if (isProfileLoading) {
-      return (
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <p className={`text-sm font-semibold ${accentTextClass}`}>
-            {t("profile.accountDetails")}
-          </p>
-          <p className={`mt-3 text-sm ${secondaryTextClass}`}>
-            {t("profile.loading")}
-          </p>
-        </section>
-      );
-    }
-
-    if (profileError && !profile) {
-      return (
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <p className={`text-sm font-semibold ${accentTextClass}`}>
-            {t("profile.accountDetails")}
-          </p>
-          <p className="mt-3 text-sm font-medium text-red-500">{profileError}</p>
-          <button
-            type="button"
-            onClick={() => fetchProfile()}
-            className={`mt-6 ${buttonClass}`}
-          >
-            {t("common.retry")}
-          </button>
-        </section>
-      );
-    }
-
-    if (!profile) {
-      return (
-        <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-          <p className={`text-sm font-semibold ${accentTextClass}`}>
-            {t("profile.accountDetails")}
-          </p>
-          <p className={`mt-3 text-sm ${secondaryTextClass}`}>
-            {t("profile.notAvailable")}
-          </p>
-        </section>
-      );
-    }
-
-    return (
-      <section className={`rounded-2xl border p-5 shadow-xl ${elevatedClass}`}>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className={`text-sm font-semibold ${accentTextClass}`}>
-              {t("profile.accountDetails")}
-            </p>
-            <h2 className="mt-3 text-xl font-semibold tracking-tight">
-              {t("profile.yourProfile")}
-            </h2>
-          </div>
-          {!isEditingProfile ? (
-            <button
-              type="button"
-              onClick={beginProfileEdit}
-              className={buttonClass}
-            >
-              {t("profile.editProfile")}
-            </button>
-          ) : null}
-        </div>
-
-        {profileMessage ? (
-          <div
-            className={`mt-5 rounded-xl border px-4 py-3 text-sm font-medium ${
-              isDark
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                : "border-emerald-200 bg-emerald-50 text-emerald-800"
-            }`}
-          >
-            {profileMessage}
-          </div>
-        ) : null}
-
-        {profileError ? (
-          <div
-            className={`mt-5 rounded-xl border px-4 py-3 text-sm font-medium ${
-              isDark
-                ? "border-red-500/35 bg-red-500/10 text-red-200"
-                : "border-red-200 bg-red-50 text-red-800"
-            }`}
-          >
-            {profileError}
-          </div>
-        ) : null}
-
-        {isEditingProfile ? (
-          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className="block md:col-span-2">
-              <span className="text-sm font-medium">{t("common.fullName")}</span>
-              <input
-                type="text"
-                value={profileForm.full_name}
-                onChange={(event) =>
-                  setProfileForm({
-                    ...profileForm,
-                    full_name: event.target.value,
-                  })
-                }
-                className={inputClass}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium">{t("common.age")}</span>
-              <input
-                type="number"
-                min="1"
-                value={profileForm.age}
-                onChange={(event) =>
-                  setProfileForm({ ...profileForm, age: event.target.value })
-                }
-                className={inputClass}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium">{t("common.email")}</span>
-              <input
-                type="email"
-                value={profileForm.email}
-                onChange={(event) =>
-                  setProfileForm({ ...profileForm, email: event.target.value })
-                }
-                className={inputClass}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium">
-                {t("common.preferredLanguage")}
-              </span>
-              <select
-                value={profileForm.preferred_language}
-                onChange={(event) =>
-                  setProfileForm({
-                    ...profileForm,
-                    preferred_language: event.target.value as LanguageCode,
-                  })
-                }
-                className={inputClass}
-              >
-                {LANGUAGE_OPTIONS.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium">
-                {t("common.educationLevel")}
-              </span>
-              <input
-                type="text"
-                value={profileForm.education_level}
-                onChange={(event) =>
-                  setProfileForm({
-                    ...profileForm,
-                    education_level: event.target.value,
-                  })
-                }
-                className={inputClass}
-              />
-            </label>
-
-            <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={handleProfileSave}
-                disabled={isSavingProfile}
-                className={buttonClass}
-              >
-                {isSavingProfile ? t("profile.saving") : t("profile.saveChanges")}
-              </button>
-              <button
-                type="button"
-                onClick={cancelProfileEdit}
-                disabled={isSavingProfile}
-                className={`h-11 rounded-xl border px-5 text-sm font-semibold transition ${
-                  isDark
-                    ? "border-[#2B373B] text-[#F4F7F6] hover:bg-[#202B2F]"
-                    : "border-[#DDE3E0] text-[#172033] hover:bg-[#EEF3F1]"
-                }`}
-              >
-                {t("common.cancel")}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div
-            className={`mt-5 divide-y ${
-              isDark ? "divide-[#2B373B]" : "divide-[#DDE3E0]"
-            }`}
-          >
-            {[
-              [t("profile.userId"), String(profile.id)],
-              [t("common.fullName"), profile.full_name],
-              [t("common.email"), profile.email],
-              [t("common.age"), String(profile.age)],
-              [
-                t("common.preferredLanguage"),
-                LANGUAGE_OPTIONS.find(
-                  (option) =>
-                    option.code === normalizeLanguage(profile.preferred_language),
-                )?.label || profile.preferred_language,
-              ],
-              [t("common.educationLevel"), profile.education_level],
-              [t("common.role"), t(`option.role.${profile.role}` as TranslationKey)],
-              [
-                t("assessment.status"),
-                assessmentResult
-                  ? t("assessment.completed")
-                  : assessmentStatus?.has_in_progress_attempt
-                    ? t("assessment.inProgress")
-                    : t("assessment.notCompleted"),
-              ],
-              [
-                t("assessment.currentLevel"),
-                assessmentResult
-                  ? t(`assessment.level.${assessmentResult.proficiency_level}` as TranslationKey)
-                  : t("common.notAvailable"),
-              ],
-              [
-                t("assessment.completedOn"),
-                assessmentResult
-                  ? new Date(assessmentResult.completed_at).toLocaleDateString()
-                  : t("common.notAvailable"),
-              ],
-              [t("profile.sessionStatus"), t("common.signedIn")],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <p className={`text-sm font-medium ${secondaryTextClass}`}>
-                  {label}
-                </p>
-                <p className="text-sm font-semibold">{value}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={handleLogout}
-          className={`mt-6 ${buttonClass}`}
-        >
-          {t("common.logout")}
-        </button>
-      </section>
-    );
+  function handleSectionChange(section: ActiveSection) {
+    setActiveSection(section);
+    setStatusMessage("");
   }
 
   function renderActiveSection() {
+    const assessmentState = {
+      assessmentStatus,
+      assessmentResult,
+      assessmentError,
+      onStartAssessment: () => router.push("/assessment"),
+      onViewAssessmentResult: () => setActiveSection("progress"),
+    };
+    const learningPlanState = {
+      learningPlan,
+      isLearningPlanLoading,
+      learningPlanError,
+      updatingLessonId,
+      onRetryLearningPlan: () => fetchLearningPlan(),
+      onLessonAction: handleLessonAction,
+    };
+    const progressState = {
+      progressRecords,
+      isProgressLoading,
+      progressError,
+      onRetryProgress: () => fetchProgressRecords(),
+    };
+    const isDark = theme === "dark";
+
     if (activeSection === "learningActivities") {
-      return renderLearningActivitiesSection();
+      return (
+        <LearningActivitiesSection
+          prototypeData={prototypeDashboardData}
+          isDark={isDark}
+          t={t}
+          onPrototypeAction={showPrototypeMessage}
+        />
+      );
     }
 
     if (activeSection === "progress") {
-      return renderProgressSection();
+      return (
+        <ProgressSection
+          {...assessmentState}
+          {...learningPlanState}
+          prototypeData={prototypeDashboardData}
+          progressState={progressState}
+          isDark={isDark}
+          t={t}
+        />
+      );
     }
 
     if (activeSection === "resources") {
-      return renderResourcesSection();
+      return (
+        <ResourcesSection
+          prototypeData={prototypeDashboardData}
+          isDark={isDark}
+          t={t}
+          onPrototypeAction={showPrototypeMessage}
+        />
+      );
     }
 
     if (activeSection === "profile") {
-      return renderProfileSection();
+      return (
+        <ProfileSection
+          {...assessmentState}
+          profile={profile}
+          profileForm={profileForm}
+          isProfileLoading={isProfileLoading}
+          isEditingProfile={isEditingProfile}
+          isSavingProfile={isSavingProfile}
+          profileError={profileError}
+          profileMessage={profileMessage}
+          isDark={isDark}
+          t={t}
+          onRetryProfile={() => fetchProfile()}
+          onBeginEdit={beginProfileEdit}
+          onCancelEdit={cancelProfileEdit}
+          onSaveProfile={handleProfileSave}
+          onLogout={handleLogout}
+          onProfileFormChange={setProfileForm}
+        />
+      );
     }
 
-    return renderDashboardSection();
+    return (
+      <DashboardOverview
+        {...assessmentState}
+        {...learningPlanState}
+        prototypeData={prototypeDashboardData}
+        profile={profile}
+        email={email}
+        isDark={isDark}
+        t={t}
+        onPrototypeAction={showPrototypeMessage}
+      />
+    );
   }
 
   if (isCheckingAuth) {
-    return <main className={pageClass} />;
+    return (
+      <main className={theme === "dark" ? "min-h-screen bg-[#071426]" : "min-h-screen bg-[#F7FBFA]"} />
+    );
   }
 
+  if (profile && !profile.profile_complete) {
+    const assessmentState = {
+      assessmentStatus,
+      assessmentResult,
+      assessmentError,
+      onStartAssessment: () => undefined,
+      onViewAssessmentResult: () => undefined,
+    };
+
+    return (
+      <AppShell
+        activeSection="profile"
+        navItems={navItems}
+        theme={theme}
+        email={email}
+        profile={profile}
+        currentLevel={t("common.notAvailable")}
+        streakLabel={t("dashboard.learningStreakValue")}
+        t={t}
+        onSectionChange={() => undefined}
+        onThemeToggle={toggleTheme}
+        onLogout={handleLogout}
+      >
+        <ProfileSection
+          {...assessmentState}
+          profile={profile}
+          profileForm={profileForm}
+          isProfileLoading={isProfileLoading}
+          isEditingProfile={false}
+          isSavingProfile={isSavingProfile}
+          profileError={profileError}
+          profileMessage={profileMessage}
+          isDark={theme === "dark"}
+          t={t}
+          onRetryProfile={() => fetchProfile()}
+          onBeginEdit={() => undefined}
+          onCancelEdit={() => undefined}
+          onSaveProfile={handleProfileSave}
+          onLogout={handleLogout}
+          onProfileFormChange={setProfileForm}
+          completionMode
+        />
+      </AppShell>
+    );
+  }
+
+  const currentLevel = assessmentResult
+    ? formatLevel(assessmentResult.proficiency_level)
+    : learningPlan
+      ? formatLevel(learningPlan.learner_proficiency_level)
+      : t("common.notAvailable");
+  const streakLabel = t("dashboard.learningStreakValue");
+
   return (
-    <main className={`${pageClass} transition-colors`}>
-      <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-5 lg:grid lg:grid-cols-[240px_1fr] lg:px-8 lg:py-8">
-        <aside
-          className={`rounded-2xl border p-4 shadow-xl lg:min-h-[calc(100vh-4rem)] ${panelClass}`}
+    <AppShell
+      activeSection={activeSection}
+      navItems={navItems}
+      theme={theme}
+      email={email}
+      profile={profile}
+      currentLevel={currentLevel}
+      streakLabel={streakLabel}
+      t={t}
+      onSectionChange={handleSectionChange}
+      onThemeToggle={toggleTheme}
+      onLogout={handleLogout}
+    >
+      {statusMessage ? (
+        <div
+          className={
+            theme === "dark"
+              ? "mb-5 rounded-2xl border border-white/10 bg-white/8 px-4 py-3 text-sm font-bold text-teal-50/80"
+              : "mb-5 rounded-2xl border border-[#DDEAE5] bg-white px-4 py-3 text-sm font-bold text-[#60746F] shadow-sm"
+          }
         >
-          <div className="mb-5">
-            <p className={`text-sm font-semibold ${accentTextClass}`}>
-              {t("common.appName")}
-            </p>
-            <p className={`mt-1 text-xs ${secondaryTextClass}`}>
-              {t("common.dashboard")}
-            </p>
-          </div>
-
-          <nav className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
-            {navItems.map((item) => {
-              const isActive = item.id === activeSection;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveSection(item.id);
-                    setStatusMessage("");
-                  }}
-                  aria-pressed={isActive}
-                  className={`whitespace-nowrap rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus:ring-4 ${
-                    isActive
-                      ? isDark
-                        ? "bg-[#63B3A7] text-[#0F1517] focus:ring-[#63B3A7]/20"
-                        : "bg-[#2F7D73] text-white focus:ring-[#2F7D73]/15"
-                      : isDark
-                        ? "text-[#A8B3B0] hover:bg-[#202B2F] hover:text-[#F4F7F6] focus:ring-[#63B3A7]/20"
-                        : "text-[#667085] hover:bg-[#EEF3F1] hover:text-[#172033] focus:ring-[#2F7D73]/15"
-                  }`}
-                >
-                  {t(item.labelKey)}
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <section className="space-y-5">
-          <header
-            className={`flex flex-col gap-4 rounded-2xl border p-5 shadow-xl sm:flex-row sm:items-center sm:justify-between ${elevatedClass}`}
-          >
-            <div>
-              <p className={`text-sm font-semibold ${accentTextClass}`}>
-                {t(navItems.find((item) => item.id === activeSection)?.labelKey || "common.dashboard")}
-              </p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-                {activeSection === "dashboard"
-                  ? t("dashboard.title")
-                  : t(navItems.find((item) => item.id === activeSection)?.labelKey || "common.dashboard")}
-              </h1>
-              <p className={`mt-2 text-sm leading-6 ${secondaryTextClass}`}>
-                {email
-                  ? `${t("dashboard.signedInAs")} ${email}`
-                  : t("dashboard.signedInGeneric")}
-              </p>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <button
-                type="button"
-                onClick={toggleTheme}
-                aria-label={
-                  theme === "dark"
-                    ? t("common.switchToLight")
-                    : t("common.switchToDark")
-                }
-                className={`inline-flex h-10 items-center justify-center gap-2 rounded-full border px-3 text-sm font-semibold transition focus:outline-none focus:ring-4 ${
-                  isDark
-                    ? "border-[#2B373B] bg-[#1B2529] text-[#F4F7F6] hover:bg-[#202B2F] focus:ring-[#63B3A7]/20"
-                    : "border-[#DDE3E0] bg-white text-[#172033] hover:bg-[#EEF3F1] focus:ring-[#2F7D73]/15"
-                }`}
-              >
-                <span>{theme === "dark" ? t("common.light") : t("common.dark")}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className={buttonClass}
-              >
-                {t("common.logout")}
-              </button>
-            </div>
-          </header>
-
-          {statusMessage ? (
-            <div
-              className={`rounded-2xl border px-4 py-3 text-sm font-medium ${elevatedClass}`}
-            >
-              {statusMessage}
-            </div>
-          ) : null}
-
-          {renderActiveSection()}
-        </section>
-      </div>
-    </main>
+          {statusMessage}
+        </div>
+      ) : null}
+      {renderActiveSection()}
+    </AppShell>
   );
 }

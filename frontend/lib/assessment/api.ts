@@ -4,8 +4,8 @@ import type {
   AssessmentResult,
   AssessmentStatusResponse,
 } from "./types";
+import { API_BASE_URL } from "@/lib/api/config";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
 const ACCESS_TOKEN_STORAGE_KEY = "access_token";
 
 export class AuthenticationError extends Error {

@@ -1,17 +1,18 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { BrandMark } from "@/components/brand/BrandMark";
 import { useLanguage } from "@/components/LanguageProvider";
+import { HeroBookIllustration, LiteracyIcon } from "@/components/ui/LiteracyIllustrations";
 import {
+  clearStoredUiLanguage,
   LANGUAGE_OPTIONS,
-  LANGUAGE_STORAGE_KEY,
   type LanguageCode,
 } from "@/lib/i18n/types";
 import { getAssessmentStatus } from "@/lib/assessment/api";
-
-const API_BASE_URL = "http://127.0.0.1:8000";
+import { API_BASE_URL } from "@/lib/api/config";
+import type { TranslationKey } from "@/lib/i18n/translations";
 
 const educationOptions = [
   { value: "No formal education", labelKey: "option.education.none" },
@@ -28,15 +29,20 @@ const roleOptions = [
   { value: "administrator", labelKey: "option.role.administrator" },
 ] as const;
 
+const experienceOptions = ["Beginner", "Intermediate", "Advanced"] as const;
+
 type ActiveTab = "login" | "register";
 type Theme = "light" | "dark";
+type ExperienceLevel = (typeof experienceOptions)[number];
 
 type RegisterForm = {
   full_name: string;
   age: string;
   email: string;
   password: string;
-  preferred_language: string;
+  comfortable_language: LanguageCode;
+  learning_language: LanguageCode;
+  experience_level: ExperienceLevel;
   education_level: string;
   role: string;
 };
@@ -47,7 +53,9 @@ type LoginForm = {
 };
 
 type UserProfile = {
-  preferred_language?: string;
+  comfortable_language?: string;
+  learning_language?: string;
+  profile_complete?: boolean;
 };
 
 type ApiErrorDetail = string | { msg?: string }[] | { msg?: string };
@@ -80,7 +88,7 @@ async function readErrorMessage(response: Response) {
 
 export default function Home() {
   const router = useRouter();
-  const { language, setLanguage, setLanguageFromValue, resetLanguage, t } =
+  const { setLanguageFromValue, resetLanguage, t } =
     useLanguage();
   const [activeTab, setActiveTab] = useState<ActiveTab>("login");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,7 +103,9 @@ export default function Home() {
     age: "",
     email: "",
     password: "",
-    preferred_language: "en",
+    comfortable_language: "en",
+    learning_language: "hi",
+    experience_level: "Beginner",
     education_level: "Primary",
     role: "learner",
   });
@@ -116,42 +126,33 @@ export default function Home() {
 
     queueMicrotask(() => {
       setTheme(resolvedTheme);
+      resetLanguage();
       setMounted(true);
     });
-  }, []);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setRegisterForm((previous) => ({
-        ...previous,
-        preferred_language: language,
-      }));
-    });
-  }, [language]);
+  }, [resetLanguage]);
 
   const isDark = theme === "dark";
 
   const pageClass = isDark
-    ? "min-h-screen bg-[#0F1517] text-[#F4F7F6]"
-    : "min-h-screen bg-[#F5F7F6] text-[#172033]";
+    ? "min-h-screen bg-[radial-gradient(circle_at_top_left,#163F3E_0,#0A1729_40%,#07111F_100%)] text-[#F4F7F6]"
+    : "min-h-screen bg-[radial-gradient(circle_at_top_left,#E6FAF4_0,#F7FAF8_42%,#F4F1E7_100%)] text-[#07192F]";
   const panelClass = isDark
-    ? "border-[#2B373B] bg-[#151D20] shadow-black/35"
-    : "border-[#DDE3E0] bg-white shadow-slate-900/8";
+    ? "border-white/10 bg-[#07192F] shadow-black/35"
+    : "border-white/25 bg-gradient-to-br from-[#06333A] via-[#06263B] to-[#07192F] shadow-slate-900/20";
   const elevatedClass = isDark
-    ? "border-[#2B373B] bg-[#151D20] shadow-black/35"
-    : "border-[#DDE3E0] bg-white shadow-slate-900/10";
-  const mutedSurfaceClass = isDark ? "bg-[#202B2F]" : "bg-[#EEF3F1]";
+    ? "border-white/10 bg-[#0D1D2F]/92 shadow-black/35"
+    : "border-white/80 bg-white/90 shadow-slate-900/10 backdrop-blur";
+  const mutedSurfaceClass = isDark ? "bg-white/8" : "bg-[#EEF8F4]";
   const primaryTextClass = isDark ? "text-[#F4F7F6]" : "text-[#172033]";
-  const secondaryTextClass = isDark ? "text-[#A8B3B0]" : "text-[#667085]";
-  const accentTextClass = isDark ? "text-[#63B3A7]" : "text-[#2F7D73]";
-  const borderClass = isDark ? "border-[#2B373B]" : "border-[#DDE3E0]";
+  const secondaryTextClass = isDark ? "text-[#B8C7C5]" : "text-[#60746F]";
+  const borderClass = isDark ? "border-white/10" : "border-[#DDEAE5]";
   const inputClass = isDark
     ? "mt-2 h-12 w-full rounded-xl border border-[#2B373B] bg-[#202B2F] px-4 text-sm text-[#F4F7F6] outline-none transition placeholder:text-[#6F7D80] hover:border-[#3A494D] focus:border-[#63B3A7] focus:ring-4 focus:ring-[#63B3A7]/20"
     : "mt-2 h-12 w-full rounded-xl border border-[#DDE3E0] bg-white px-4 text-sm text-[#172033] outline-none transition placeholder:text-[#98A2B3] hover:border-[#C7D1CD] focus:border-[#2F7D73] focus:ring-4 focus:ring-[#2F7D73]/15";
   const labelClass = `text-sm font-medium ${primaryTextClass}`;
   const buttonClass = isDark
-    ? "h-12 w-full rounded-xl bg-[#63B3A7] px-5 text-sm font-semibold text-[#0F1517] shadow-lg shadow-[#63B3A7]/10 transition hover:bg-[#79C7BC] focus:outline-none focus:ring-4 focus:ring-[#63B3A7]/20 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-    : "h-12 w-full rounded-xl bg-[#2F7D73] px-5 text-sm font-semibold text-white shadow-lg shadow-[#2F7D73]/15 transition hover:bg-[#25675F] focus:outline-none focus:ring-4 focus:ring-[#2F7D73]/15 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60";
+    ? "group h-12 w-full rounded-xl bg-gradient-to-r from-[#63D8C8] to-[#A7F3D0] px-5 text-sm font-black text-[#07111F] shadow-lg shadow-[#63D8C8]/10 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-[#63D8C8]/20 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+    : "group h-12 w-full rounded-xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-5 text-sm font-black text-white shadow-lg shadow-[#0F766E]/20 transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-[#14B8A6]/20 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60";
   const benefitKeys = [
     "auth.benefitLanguage",
     "auth.benefitPath",
@@ -199,9 +200,12 @@ export default function Home() {
 
     setRegisterForm((previous) => ({
       ...previous,
-      preferred_language: selectedLanguage,
+      comfortable_language: selectedLanguage,
+      learning_language:
+        previous.learning_language === selectedLanguage
+          ? LANGUAGE_OPTIONS.find((option) => option.code !== selectedLanguage)?.code || "en"
+          : previous.learning_language,
     }));
-    setLanguage(selectedLanguage);
   }
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
@@ -226,8 +230,6 @@ export default function Home() {
         return;
       }
 
-      const selectedLanguage = registerForm.preferred_language as LanguageCode;
-      setLanguage(selectedLanguage);
       setMessage(t("auth.registrationSuccessful"));
       setActiveTab("login");
       setLoginForm({
@@ -239,7 +241,9 @@ export default function Home() {
         age: "",
         email: "",
         password: "",
-        preferred_language: selectedLanguage,
+        comfortable_language: "en",
+        learning_language: "hi",
+        experience_level: "Beginner",
         education_level: "Primary",
         role: "learner",
       });
@@ -273,6 +277,7 @@ export default function Home() {
       const data = (await response.json()) as { access_token: string };
       localStorage.setItem("access_token", data.access_token);
       localStorage.setItem("login_email", loginForm.email);
+      let profileComplete = true;
       try {
         const profileResponse = await fetch(`${API_BASE_URL}/users/me`, {
           headers: {
@@ -282,10 +287,23 @@ export default function Home() {
 
         if (profileResponse.ok) {
           const profile = (await profileResponse.json()) as UserProfile;
-          setLanguageFromValue(profile.preferred_language);
+          const resolvedUiLanguage = setLanguageFromValue(profile.comfortable_language);
+          console.log({
+            comfortableLanguage: profile.comfortable_language,
+            learningLanguage: profile.learning_language,
+            appliedUiLanguage: resolvedUiLanguage,
+          });
+          profileComplete = Boolean(profile.profile_complete);
         }
       } catch {
         console.warn("Could not load profile language after login.");
+      }
+
+      if (!profileComplete) {
+        setLoggedInEmail(loginForm.email);
+        setMessage(t("auth.loginSuccessful"));
+        router.push("/dashboard");
+        return;
       }
 
       try {
@@ -313,13 +331,15 @@ export default function Home() {
   function handleLogout() {
     localStorage.removeItem("access_token");
     localStorage.removeItem("login_email");
-    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    clearStoredUiLanguage();
     resetLanguage();
     setLoggedInEmail("");
     setLoginForm({ email: "", password: "" });
     setRegisterForm((previous) => ({
       ...previous,
-      preferred_language: "en",
+      comfortable_language: "en",
+      learning_language: "hi",
+      experience_level: "Beginner",
     }));
     setActiveTab("login");
     setMessage("");
@@ -385,62 +405,48 @@ export default function Home() {
 
   return (
     <main className={`${pageClass} transition-colors`}>
-      <div className="mx-auto flex max-w-6xl justify-end px-4 pt-4 sm:px-6 md:px-8">
+      <div className="mx-auto flex max-w-7xl justify-end px-4 pt-4 sm:px-6 md:px-8">
         {themeToggle}
       </div>
 
-      <section className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl grid-cols-1 gap-4 px-4 py-5 sm:px-6 md:px-8 lg:grid-cols-[0.42fr_0.58fr] lg:items-center lg:gap-5 lg:py-7">
+      <section className="page-enter mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl grid-cols-1 gap-5 px-4 py-5 sm:px-6 md:px-8 lg:grid-cols-[0.48fr_0.52fr] lg:items-center lg:gap-6 lg:py-7">
         <div
-          className={`overflow-hidden rounded-3xl border p-5 shadow-2xl sm:p-6 lg:min-h-[580px] lg:p-8 ${panelClass}`}
+          className={`relative overflow-hidden rounded-[2rem] border p-5 shadow-2xl sm:p-7 lg:min-h-[680px] lg:p-8 ${panelClass}`}
         >
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_25%,rgba(99,216,200,0.28),transparent_28%),radial-gradient(circle_at_18%_10%,rgba(247,215,116,0.15),transparent_24%)]" />
           <div className="flex h-full flex-col justify-between gap-6">
-            <div>
-              <p className={`text-sm font-semibold ${accentTextClass}`}>
+            <div className="relative">
+              <BrandMark light />
+              <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-xs font-bold text-teal-50 backdrop-blur">
+                <span className="h-2 w-2 rounded-full bg-[#63D8C8]" />
                 {t("common.platform")}
-              </p>
+              </div>
               <h1
-                className={`mt-4 max-w-md text-3xl font-semibold leading-tight tracking-tight sm:text-4xl ${primaryTextClass}`}
+                className="mt-6 max-w-md text-4xl font-black leading-[1.04] tracking-normal text-white sm:text-5xl"
               >
                 {t("auth.heroHeading")}
               </h1>
-              <p className={`mt-2 text-sm font-semibold ${accentTextClass}`}>
-                {t("common.appName")}
-              </p>
-              <p className={`mt-4 max-w-md text-base leading-7 ${secondaryTextClass}`}>
+              <p className="mt-4 max-w-md text-base leading-7 text-teal-50/82">
                 {t("auth.heroDescription")}
               </p>
-              <ul className="mt-5 space-y-3">
+              <ul className="mt-7 space-y-3">
                 {benefitKeys.map((key) => (
-                  <li key={key} className="flex gap-3 text-sm leading-6">
-                    <span
-                      aria-hidden="true"
-                      className={`mt-2 h-2 w-2 shrink-0 rounded-full ${
-                        isDark ? "bg-[#63B3A7]" : "bg-[#2F7D73]"
-                      }`}
-                    />
-                    <span className={secondaryTextClass}>{t(key)}</span>
+                  <li key={key} className="flex items-start gap-3 text-sm leading-6 text-teal-50/88">
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/10 ring-1 ring-white/15">
+                      <LiteracyIcon name={key === "auth.benefitLanguage" ? "vocabulary" : key === "auth.benefitPath" ? "path" : "growth"} className="h-5 w-5" />
+                    </span>
+                    <span>{t(key)}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className="flex flex-col items-center gap-3 pt-1">
-              <div
-                className={`flex w-full justify-center rounded-2xl py-4 ${
-                  isDark ? "bg-[#202B2F]/45" : "bg-[#EEF3F1]/70"
-                }`}
-              >
-                <Image
-                  src="/assets/literacy-book.svg"
-                  alt="Line-art open book with a glowing letter above it"
-                  width={720}
-                  height={520}
-                  priority
-                  className="h-auto w-full max-w-[300px] sm:max-w-[340px] lg:max-w-[360px]"
-                />
+            <div className="relative">
+              <div className="float-soft mx-auto max-w-[430px]">
+                <HeroBookIllustration className="h-auto w-full drop-shadow-2xl" />
               </div>
-              <figure className={`px-2 text-center ${secondaryTextClass}`}>
-                <blockquote className="text-sm italic leading-6">
+              <figure className="mx-auto max-w-sm px-2 text-center text-teal-50/78">
+                <blockquote className="text-sm font-semibold italic leading-6">
                   &ldquo;{t("auth.quote")}&rdquo;
                 </blockquote>
               </figure>
@@ -450,8 +456,11 @@ export default function Home() {
 
         <div className="flex items-center justify-center">
           <section
-            className={`w-full max-w-[500px] rounded-3xl border p-5 shadow-2xl sm:p-7 lg:p-8 ${elevatedClass}`}
+            className={`odyssey-card w-full max-w-[520px] rounded-[2rem] border p-5 shadow-2xl sm:p-7 lg:p-8 ${elevatedClass}`}
           >
+            <div className="mb-6">
+              <BrandMark compact={false} light={isDark} />
+            </div>
             <div
               className={`mb-4 grid grid-cols-2 rounded-2xl border p-1.5 ${borderClass} ${mutedSurfaceClass}`}
             >
@@ -657,9 +666,9 @@ export default function Home() {
                   </label>
 
                   <label className="block">
-                    <span className={labelClass}>{t("common.preferredLanguage")}</span>
+                    <span className={labelClass}>{t("common.comfortableLanguage")}</span>
                     <select
-                      value={registerForm.preferred_language}
+                      value={registerForm.comfortable_language}
                       onChange={handleLanguageChange}
                       className={inputClass}
                     >
@@ -670,7 +679,55 @@ export default function Home() {
                       ))}
                     </select>
                     <span className={`mt-2 block text-xs leading-5 ${secondaryTextClass}`}>
-                      {t("auth.languageHelper")}
+                      {t("auth.comfortableLanguageHelper")}
+                    </span>
+                  </label>
+
+                  <label className="block">
+                    <span className={labelClass}>{t("common.learningLanguage")}</span>
+                    <select
+                      value={registerForm.learning_language}
+                      onChange={(event) =>
+                        setRegisterForm({
+                          ...registerForm,
+                          learning_language: event.target.value as LanguageCode,
+                        })
+                      }
+                      className={inputClass}
+                    >
+                      {LANGUAGE_OPTIONS.filter(
+                        (option) => option.code !== registerForm.comfortable_language,
+                      ).map((option) => (
+                        <option key={option.code} value={option.code}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={`mt-2 block text-xs leading-5 ${secondaryTextClass}`}>
+                      {t("auth.learningLanguageHelper")}
+                    </span>
+                  </label>
+
+                  <label className="block">
+                    <span className={labelClass}>{t("common.experienceLevel")}</span>
+                    <select
+                      value={registerForm.experience_level}
+                      onChange={(event) =>
+                        setRegisterForm({
+                          ...registerForm,
+                          experience_level: event.target.value as ExperienceLevel,
+                        })
+                      }
+                      className={inputClass}
+                    >
+                      {experienceOptions.map((level) => (
+                        <option key={level} value={level}>
+                          {t(`assessment.level.${level.toLowerCase()}` as TranslationKey)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={`mt-2 block text-xs leading-5 ${secondaryTextClass}`}>
+                      {t("auth.experienceLevelHelper")}
                     </span>
                   </label>
 

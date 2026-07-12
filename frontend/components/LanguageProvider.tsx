@@ -11,9 +11,10 @@ import {
 
 import { translate, type TranslationKey } from "@/lib/i18n/translations";
 import {
-  LANGUAGE_STORAGE_KEY,
+  clearStoredUiLanguage,
   normalizeLanguage,
   type LanguageCode,
+  writeStoredUiLanguage,
 } from "@/lib/i18n/types";
 
 type TranslationReplacements = Record<string, string | number>;
@@ -32,19 +33,12 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<LanguageCode>("en");
 
   useEffect(() => {
-    const savedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    queueMicrotask(() => {
-      setLanguageState(normalizeLanguage(savedLanguage));
-    });
-  }, []);
-
-  useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
 
   const setLanguage = useCallback((nextLanguage: LanguageCode) => {
     setLanguageState(nextLanguage);
-    localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+    writeStoredUiLanguage(nextLanguage);
   }, []);
 
   const setLanguageFromValue = useCallback(
@@ -57,7 +51,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   );
 
   const resetLanguage = useCallback(() => {
-    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    clearStoredUiLanguage();
     setLanguageState("en");
   }, []);
 
