@@ -41,7 +41,7 @@ export function AssessmentReview({
       className={
         isDark
           ? "rounded-2xl border border-[#2B373B] bg-[#151D20] p-6 shadow-xl"
-          : "rounded-2xl border border-[#DDE3E0] bg-white p-6 shadow-xl"
+          : "rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 shadow-xl"
       }
     >
       <h1 className="text-2xl font-semibold tracking-tight">{t("assessment.review")}</h1>
@@ -62,7 +62,7 @@ export function AssessmentReview({
               className={
                 isDark
                   ? "flex w-full items-center justify-between rounded-xl border border-[#2B373B] bg-[#202B2F] p-4 text-left"
-                  : "flex w-full items-center justify-between rounded-xl border border-[#DDE3E0] bg-[#F5F7F6] p-4 text-left"
+                  : "flex w-full items-center justify-between rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-muted)] p-4 text-left"
               }
             >
               <span className="font-semibold">{t(`assessment.${section.section}` as TranslationKey)}</span>

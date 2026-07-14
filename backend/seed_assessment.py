@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 import models
+from question_taxonomy import (
+    normalize_experience_level,
+)
 
 
 ASSESSMENT_STABLE_KEY = "initial-literacy"
@@ -169,6 +172,46 @@ def _reading_distractors(language: str, passage_index: int, words: list[str]):
     return [words[passage_index], words[(passage_index + 4) % len(words)], words[(passage_index + 5) % len(words)]]
 
 
+def _assessment_question_metadata(question: dict) -> dict:
+    section = question["section"]
+    difficulty = question["difficulty"]
+    skill_tag = question.get("skill_tag")
+    skill_map = {
+        "word recognition": "vocabulary",
+        "literal comprehension": "reading",
+        "passage comprehension": "reading",
+        "copy accuracy": "writing",
+        "sentence completion": "grammar",
+        "short response": "writing",
+        "vocabulary": "vocabulary",
+        "sentence meaning": "grammar",
+        "basic comprehension": "comprehension",
+    }
+    difficulty_rating_map = {
+        "reading": {"beginner": 1, "intermediate": 2, "advanced": 4},
+        "typing": {"beginner": 2, "intermediate": 3, "advanced": 5},
+        "mcq": {"beginner": 1, "intermediate": 4, "advanced": 5},
+    }
+    return {
+        "skill": skill_map.get(skill_tag, "comprehension"),
+        "difficulty_rating": difficulty_rating_map[section][difficulty],
+        "age_group": {
+            "beginner": "Child",
+            "intermediate": "Teenager",
+            "advanced": "Adult",
+        }[difficulty],
+        "experience_level": normalize_experience_level(
+            {
+                "beginner": "Beginner",
+                "intermediate": "Intermediate",
+                "advanced": "Advanced",
+            }[difficulty]
+        ),
+        "comfortable_language": question["language"],
+        "learning_language": question["language"],
+    }
+
+
 def _validate_option_question(question: dict):
     if question["question_type"] not in {"reading_mcq", "mcq"}:
         return
@@ -208,6 +251,12 @@ def _question_payload(question: dict):
         "section": question["section"],
         "language": question["language"],
         "difficulty": question["difficulty"],
+        "difficulty_rating": question.get("difficulty_rating"),
+        "age_group": question.get("age_group"),
+        "experience_level": question.get("experience_level"),
+        "comfortable_language": question.get("comfortable_language"),
+        "learning_language": question.get("learning_language"),
+        "skill": question.get("skill"),
         "question_type": question["question_type"],
         "passage": question.get("passage"),
         "prompt": question["prompt"],
@@ -380,6 +429,7 @@ def build_question_bank():
                 "skill_tag": "basic comprehension",
             })
     for question in bank:
+        question.update(_assessment_question_metadata(question))
         _validate_option_question(question)
     return bank
 

@@ -26,6 +26,20 @@ SKILLS = {
 }
 
 
+def _set_attrs(instance, **values):
+    for key, value in values.items():
+        setattr(instance, key, value)
+
+
+def _has_progress(db: Session, lesson_id: int) -> bool:
+    return (
+        db.query(models.LearnerProgress.id)
+        .filter(models.LearnerProgress.lesson_id == lesson_id)
+        .first()
+        is not None
+    )
+
+
 def seed_learning_content(db: Session) -> None:
     language = "en"
     for level in LEVELS:
@@ -49,25 +63,24 @@ def seed_learning_content(db: Session) -> None:
             db.add(course)
             db.flush()
 
+        canonical_lessons: list[models.Lesson] = []
         order = 1
         for skill, lesson_templates in SKILLS.items():
             for title, description in lesson_templates:
                 lesson_title = f"{level.title()} {title}"
-                exists = (
+                matches = (
                     db.query(models.Lesson)
                     .filter(
                         models.Lesson.course_id == course.id,
                         models.Lesson.title == lesson_title,
                         models.Lesson.language == language,
                     )
-                    .first()
+                    .order_by(models.Lesson.created_at, models.Lesson.id)
+                    .all()
                 )
-                if exists:
-                    order += 1
-                    continue
-
-                db.add(
-                    models.Lesson(
+                lesson = matches[0] if matches else None
+                if not lesson:
+                    lesson = models.Lesson(
                         course_id=course.id,
                         title=lesson_title,
                         description=f"{description} Designed for {level} learners.",
@@ -79,11 +92,57 @@ def seed_learning_content(db: Session) -> None:
                         proficiency_level=level,
                         language=language,
                         difficulty_order=order,
+                        sequence_order=order,
                         estimated_duration_minutes=12 + (LEVELS.index(level) * 4) + (order % 4),
                         is_active=True,
+                        is_published=True,
                     )
-                )
+                    db.add(lesson)
+                else:
+                    _set_attrs(
+                        lesson,
+                        course_id=course.id,
+                        title=lesson_title,
+                        description=f"{description} Designed for {level} learners.",
+                        content=(
+                            f"Lesson activities for {lesson_title}: guided practice, "
+                            "examples, independent exercise, and a short reflection."
+                        ),
+                        skill_type=skill,
+                        proficiency_level=level,
+                        language=language,
+                        difficulty_order=order,
+                        sequence_order=order,
+                        estimated_duration_minutes=12 + (LEVELS.index(level) * 4) + (order % 4),
+                        is_active=True,
+                        is_published=True,
+                    )
+                canonical_lessons.append(lesson)
+                for duplicate in matches[1:]:
+                    if not _has_progress(db, duplicate.id):
+                        _set_attrs(duplicate, is_active=False, is_published=False)
                 order += 1
+        active_lessons = (
+            db.query(models.Lesson)
+            .filter(
+                models.Lesson.course_id == course.id,
+                models.Lesson.language == language,
+                models.Lesson.is_active == True,
+                models.Lesson.is_published == True,
+            )
+            .all()
+        )
+        canonical_ids = {lesson.id for lesson in canonical_lessons}
+        canonical_titles = {lesson.title for lesson in canonical_lessons}
+        for stale_lesson in active_lessons:
+            if stale_lesson.id in canonical_ids:
+                continue
+            if stale_lesson.title in canonical_titles:
+                continue
+            if not _has_progress(db, stale_lesson.id):
+                _set_attrs(stale_lesson, is_active=False, is_published=False)
+        for index, lesson in enumerate(canonical_lessons, start=1):
+            _set_attrs(lesson, sequence_order=index, difficulty_order=index)
     db.commit()
 
 

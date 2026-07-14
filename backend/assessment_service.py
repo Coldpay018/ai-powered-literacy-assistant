@@ -9,7 +9,17 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
+from adaptive_difficulty_service import evaluate_difficulty
 from language_utils import normalize_language
+from question_taxonomy import (
+    clamp_difficulty,
+    normalize_age_group,
+    normalize_difficulty_value,
+    normalize_experience_level,
+    normalize_question_language,
+    normalize_question_skill,
+    normalize_question_type,
+)
 from seed_assessment import ASSESSMENT_VERSION
 
 
@@ -126,6 +136,59 @@ def _shuffle_options(question: models.AssessmentQuestion):
     return shuffled
 
 
+def _normalized_question_payload(question: models.AssessmentQuestion) -> dict:
+    try:
+        normalized_question_type = normalize_question_type(question.question_type)
+    except ValueError:
+        normalized_question_type = question.question_type
+
+    try:
+        normalized_skill = normalize_question_skill(question.skill or question.skill_tag)
+    except ValueError:
+        normalized_skill = None
+
+    try:
+        normalized_difficulty = clamp_difficulty(normalize_difficulty_value(question.difficulty_rating) or 1)
+    except ValueError:
+        normalized_difficulty = 1
+
+    try:
+        age_group = normalize_age_group(question.age_group) if question.age_group else None
+    except ValueError:
+        age_group = None
+    try:
+        experience_level = normalize_experience_level(question.experience_level) if question.experience_level else None
+    except ValueError:
+        experience_level = None
+    try:
+        comfortable_language = (
+            normalize_question_language(question.comfortable_language)
+            if question.comfortable_language
+            else None
+        )
+    except ValueError:
+        comfortable_language = None
+    try:
+        learning_language = (
+            normalize_question_language(question.learning_language)
+            if question.learning_language
+            else None
+        )
+    except ValueError:
+        learning_language = None
+
+    return {
+        "question_id": question.id,
+        "question_type": normalized_question_type,
+        "difficulty_rating": normalized_difficulty,
+        "skill": normalized_skill,
+        "age_group": age_group,
+        "experience_level": experience_level,
+        "comfortable_language": comfortable_language,
+        "learning_language": learning_language,
+    }
+
+
 def start_or_resume(db: Session, user: models.User):
     if user.role != "learner":
         raise HTTPException(status_code=403, detail="Assessment is required only for learners")
@@ -231,10 +294,10 @@ def serialize_attempt(db: Session, attempt: models.AssessmentAttempt):
             if attempt_question.section != section:
                 continue
             questions.append({
+                **_normalized_question_payload(question),
                 "attempt_question_id": attempt_question.id,
                 "section": section,
                 "display_order": attempt_question.display_order,
-                "question_type": question.question_type,
                 "difficulty": question.difficulty,
                 "passage": question.passage,
                 "prompt": question.prompt,
@@ -439,12 +502,29 @@ def submit_attempt(db: Session, user: models.User, attempt_id: int):
         raise HTTPException(status_code=422, detail="Required answer missing")
 
     totals = {section: {"awarded": 0.0, "max": 0.0} for section in SECTION_ORDER}
+    difficulty_adjustments = []
     for attempt_question, question in rows:
         answer_row = answers.get(attempt_question.id)
         if not answer_row:
             raise HTTPException(status_code=422, detail="Required answer missing")
         _validate_answer(question, attempt_question, _loads(answer_row.answer_json, {}))
         marks, is_correct, details = _score_answer(question, attempt_question, answer_row)
+        graded_correct = bool(is_correct) if is_correct is not None else marks >= (attempt_question.maximum_marks * 0.75)
+        difficulty_adjustments.append(
+            evaluate_difficulty(
+                db,
+                user.id,
+                question.skill or question.skill_tag,
+                graded_correct,
+                context={
+                    "source": "assessment",
+                    "attempt_id": attempt.id,
+                    "question_id": question.id,
+                    "event_id": f"assessment:{attempt.id}:{attempt_question.id}",
+                },
+                commit=False,
+            )
+        )
         answer_row.marks_awarded = round(float(marks), 2)
         answer_row.is_correct = is_correct
         answer_row.scoring_details_json = _dumps(details)
@@ -477,10 +557,10 @@ def submit_attempt(db: Session, user: models.User, attempt_id: int):
     db.add(result)
     db.commit()
     db.refresh(result)
-    return result_response(result)
+    return result_response(result, difficulty_adjustments=difficulty_adjustments)
 
 
-def result_response(result: models.AssessmentResult):
+def result_response(result: models.AssessmentResult, difficulty_adjustments: list[dict] | None = None):
     return {
         "completed": True,
         "assessment_version": result.assessment_version,
@@ -490,6 +570,7 @@ def result_response(result: models.AssessmentResult):
         "mcq_score": result.mcq_score,
         "overall_score": result.overall_score,
         "proficiency_level": result.proficiency_level,
+        "difficulty_adjustments": difficulty_adjustments or [],
     }
 
 

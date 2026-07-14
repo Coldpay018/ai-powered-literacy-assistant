@@ -73,6 +73,7 @@ export type LearningPlanState = {
   updatingLessonId: number | null;
   onRetryLearningPlan: () => void;
   onLessonAction: (lesson: RecommendedLesson) => void;
+  onStartLearning: (courseId?: number) => void;
 };
 
 export type ProgressState = {

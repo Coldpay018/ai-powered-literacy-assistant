@@ -25,6 +25,14 @@ def _set_attrs(instance, **values):
         instance.updated_at = _now()
 
 
+def _question_difficulty(question_type: str) -> int:
+    return {
+        "mcq": 2,
+        "true_false": 1,
+        "short_answer": 3,
+    }.get(question_type, 2)
+
+
 def _upsert_module(db: Session, course: models.Course, payload: dict) -> models.CourseModule:
     module = (
         db.query(models.CourseModule)
@@ -150,6 +158,11 @@ def _upsert_question(
         "question_type": payload["question_type"],
         "skill": DEMO_SKILL,
         "difficulty_level": DEMO_DIFFICULTY,
+        "difficulty_rating": payload.get("difficulty_rating", _question_difficulty(payload["question_type"])),
+        "age_group": payload.get("age_group", "Child"),
+        "experience_level": payload.get("experience_level", "Beginner"),
+        "comfortable_language": DEMO_LANGUAGE,
+        "learning_language": DEMO_LANGUAGE,
         "minimum_age": 9,
         "maximum_age": 11,
         "correct_answer": payload["correct_answer"],

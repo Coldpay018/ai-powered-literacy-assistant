@@ -24,6 +24,7 @@ import type {
 import { validateQuestion } from "@/lib/assessment/validation";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { API_BASE_URL } from "@/lib/api/config";
+import { applyDocumentTheme } from "@/lib/theme";
 
 type Theme = "light" | "dark";
 type Stage = "intro" | "question" | "review" | "result";
@@ -53,6 +54,10 @@ export default function InitialAssessmentPage() {
   const [saveMessage, setSaveMessage] = useState("");
 
   const isDark = theme === "dark";
+
+  useEffect(() => {
+    applyDocumentTheme(theme);
+  }, [theme]);
 
   const loadStatus = useCallback(
     async (authToken: string) => {
@@ -188,17 +193,17 @@ export default function InitialAssessmentPage() {
 
   const pageClass = isDark
     ? "min-h-screen bg-[#0F1517] text-[#F4F7F6]"
-    : "min-h-screen bg-[#F5F7F6] text-[#172033]";
+    : "min-h-screen bg-[var(--app-page)] text-[#172033]";
   const panelClass = isDark
     ? "border-[#2B373B] bg-[#151D20]"
-    : "border-[#DDE3E0] bg-white";
+    : "border-[var(--app-border)] bg-[var(--app-surface)]";
   const secondaryTextClass = isDark ? "text-[#A8B3B0]" : "text-[#667085]";
   const buttonClass = isDark
     ? "rounded-xl bg-[#63B3A7] px-5 py-3 text-sm font-semibold text-[#0F1517] transition hover:bg-[#79C7BC] disabled:opacity-60"
     : "rounded-xl bg-[#2F7D73] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25675F] disabled:opacity-60";
   const secondaryButtonClass = isDark
     ? "rounded-xl border border-[#2B373B] px-5 py-3 text-sm font-semibold text-[#F4F7F6] transition hover:bg-[#202B2F]"
-    : "rounded-xl border border-[#DDE3E0] px-5 py-3 text-sm font-semibold text-[#172033] transition hover:bg-[#EEF3F1]";
+    : "rounded-xl border border-[var(--app-border)] px-5 py-3 text-sm font-semibold text-[#172033] transition hover:bg-[var(--app-surface-muted)]";
 
   async function startOrResumeAssessment() {
     if (!token) {

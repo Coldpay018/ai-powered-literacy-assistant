@@ -21,7 +21,7 @@ export function SkillBar({ label, value, icon = "book", isDark = false }: SkillB
           </span>
           <p className="truncate text-sm font-bold">{label}</p>
         </div>
-        <p className={isDark ? "text-sm font-semibold text-teal-100/70" : "text-sm font-semibold text-[#60746F]"}>
+        <p className={isDark ? "text-sm font-semibold text-teal-100/70" : "text-sm font-semibold text-[#667085]"}>
           {normalizedValue}%
         </p>
       </div>

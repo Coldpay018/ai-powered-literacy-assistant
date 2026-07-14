@@ -54,16 +54,16 @@ export function ProfileSection({
 }: ProfileSectionProps) {
   const cardClass = isDark
     ? "rounded-3xl border border-white/10 bg-[#0D1D2F]/82 p-5 shadow-2xl shadow-black/20"
-    : "rounded-3xl border border-[#DDEAE5] bg-white/92 p-5 shadow-xl shadow-slate-900/6";
+    : "rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
   const inputClass = isDark
     ? "mt-2 h-12 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#63D8C8] focus:ring-4 focus:ring-[#63D8C8]/15"
-    : "mt-2 h-12 w-full rounded-2xl border border-[#DDEAE5] bg-white px-4 text-sm text-[#07192F] outline-none transition placeholder:text-[#98A2B3] focus:border-[#0F766E] focus:ring-4 focus:ring-[#14B8A6]/15";
+    : "mt-2 h-12 w-full rounded-2xl border border-[var(--app-border)] bg-white px-4 text-sm text-[#172033] outline-none transition placeholder:text-[#98A2B3] focus:border-[#0F766E] focus:ring-4 focus:ring-[#14B8A6]/15";
 
   if (isProfileLoading) {
     return (
       <section className={cardClass}>
         <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>{t("profile.accountDetails")}</p>
-        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("profile.loading")}</p>
+        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("profile.loading")}</p>
       </section>
     );
   }
@@ -84,7 +84,7 @@ export function ProfileSection({
     return (
       <section className={cardClass}>
         <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>{t("profile.accountDetails")}</p>
-        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("profile.notAvailable")}</p>
+        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("profile.notAvailable")}</p>
       </section>
     );
   }
@@ -136,7 +136,7 @@ export function ProfileSection({
             <div>
               <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>{t("common.appName")}</p>
               <h2 className="mt-1 text-2xl font-black tracking-normal">{profile.full_name}</h2>
-              <p className={isDark ? "mt-1 text-sm text-teal-50/62" : "mt-1 text-sm text-[#60746F]"}>{profile.email}</p>
+              <p className={isDark ? "mt-1 text-sm text-teal-50/62" : "mt-1 text-sm text-[#667085]"}>{profile.email}</p>
             </div>
           </div>
           {!isEditingProfile && !completionMode ? (
@@ -166,7 +166,7 @@ export function ProfileSection({
               <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>
                 {t("profile.completeTitle")}
               </p>
-              <p className={isDark ? "mt-2 text-sm leading-6 text-teal-50/66" : "mt-2 text-sm leading-6 text-[#60746F]"}>
+              <p className={isDark ? "mt-2 text-sm leading-6 text-teal-50/66" : "mt-2 text-sm leading-6 text-[#667085]"}>
                 {t("profile.completeHelp")}
               </p>
             </div>
@@ -304,7 +304,7 @@ export function ProfileSection({
               type="button"
               onClick={onCancelEdit}
               disabled={isSavingProfile}
-              className={`${completionMode ? "hidden" : ""} ${isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/8" : "rounded-2xl border border-[#DDEAE5] bg-white px-5 py-3 text-sm font-black text-[#07192F] transition hover:bg-[#F7FBFA]"}`}
+              className={`${completionMode ? "hidden" : ""} ${isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/8" : "rounded-2xl border border-[var(--app-border)] bg-white px-5 py-3 text-sm font-black text-[#172033] transition hover:bg-[var(--app-surface-muted)]"}`}
             >
               {t("common.cancel")}
             </button>
@@ -315,11 +315,11 @@ export function ProfileSection({
           {rows.map(([label, value]) => (
             <article key={label} className={cardClass}>
               <div className="flex items-center gap-3">
-                <span className={isDark ? "grid h-10 w-10 place-items-center rounded-xl bg-white/8" : "grid h-10 w-10 place-items-center rounded-xl bg-[#E9F8F4]"}>
+                <span className={isDark ? "grid h-10 w-10 place-items-center rounded-xl bg-white/8" : "grid h-10 w-10 place-items-center rounded-xl bg-[var(--app-surface-muted)]"}>
                   <LiteracyIcon name="profile" className="h-6 w-6" />
                 </span>
                 <div className="min-w-0">
-                  <p className={isDark ? "text-xs font-black text-teal-50/55" : "text-xs font-black text-[#60746F]"}>{label}</p>
+                  <p className={isDark ? "text-xs font-black text-teal-50/55" : "text-xs font-black text-[#667085]"}>{label}</p>
                   <p className="mt-1 truncate text-sm font-black">{value}</p>
                 </div>
               </div>
@@ -331,7 +331,7 @@ export function ProfileSection({
       <button
         type="button"
         onClick={onLogout}
-        className={isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/8" : "rounded-2xl border border-[#DDEAE5] bg-white px-5 py-3 text-sm font-black text-[#07192F] transition hover:bg-[#F7FBFA]"}
+        className={isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/8" : "rounded-2xl border border-[var(--app-border)] bg-white px-5 py-3 text-sm font-black text-[#172033] transition hover:bg-[var(--app-surface-muted)]"}
       >
         {t("common.logout")}
       </button>

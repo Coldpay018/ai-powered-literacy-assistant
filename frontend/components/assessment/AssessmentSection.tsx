@@ -25,22 +25,22 @@ export function AssessmentSection({
 }: AssessmentSectionProps) {
   const inputClass = isDark
     ? "mt-3 w-full rounded-xl border border-[#2B373B] bg-[#202B2F] px-4 py-3 text-sm text-[#F4F7F6] outline-none focus:border-[#63B3A7] focus:ring-4 focus:ring-[#63B3A7]/20"
-    : "mt-3 w-full rounded-xl border border-[#DDE3E0] bg-white px-4 py-3 text-sm text-[#172033] outline-none focus:border-[#2F7D73] focus:ring-4 focus:ring-[#2F7D73]/15";
+    : "mt-3 w-full rounded-xl border border-[var(--app-border)] bg-white px-4 py-3 text-sm text-[#172033] outline-none focus:border-[#2F7D73] focus:ring-4 focus:ring-[#2F7D73]/15";
 
   return (
     <section>
-      <div className={isDark ? "rounded-2xl border border-[#2B373B] bg-[#151D20] p-5" : "rounded-2xl border border-[#DDE3E0] bg-white p-5"}>
+      <div className={isDark ? "rounded-2xl border border-[#2B373B] bg-[#151D20] p-5" : "rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5"}>
         <div className="mb-4 flex flex-wrap gap-2">
-          <span className={isDark ? "rounded-full bg-[#202B2F] px-3 py-1 text-sm text-[#63B3A7]" : "rounded-full bg-[#EEF3F1] px-3 py-1 text-sm text-[#2F7D73]"}>
+          <span className={isDark ? "rounded-full bg-[#202B2F] px-3 py-1 text-sm text-[#63B3A7]" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-sm text-[#2F7D73]"}>
             {question.difficulty}
           </span>
-          <span className={isDark ? "rounded-full bg-[#202B2F] px-3 py-1 text-sm text-[#A8B3B0]" : "rounded-full bg-[#EEF3F1] px-3 py-1 text-sm text-[#667085]"}>
+          <span className={isDark ? "rounded-full bg-[#202B2F] px-3 py-1 text-sm text-[#A8B3B0]" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-sm text-[#667085]"}>
             {question.marks} {t("assessment.marks")}
           </span>
         </div>
 
         {question.passage ? (
-          <div className={isDark ? "mb-5 rounded-xl bg-[#202B2F] p-4 text-sm leading-7" : "mb-5 rounded-xl bg-[#F5F7F6] p-4 text-sm leading-7"}>
+          <div className={isDark ? "mb-5 rounded-xl bg-[#202B2F] p-4 text-sm leading-7" : "mb-5 rounded-xl bg-[var(--app-surface-muted)] p-4 text-sm leading-7"}>
             {question.passage}
           </div>
         ) : null}
@@ -53,7 +53,7 @@ export function AssessmentSection({
             {question.options.map((option) => (
               <label
                 key={option.id}
-                className={isDark ? "flex cursor-pointer gap-3 rounded-xl border border-[#2B373B] bg-[#202B2F] p-4 text-sm" : "flex cursor-pointer gap-3 rounded-xl border border-[#DDE3E0] bg-white p-4 text-sm"}
+                className={isDark ? "flex cursor-pointer gap-3 rounded-xl border border-[#2B373B] bg-[#202B2F] p-4 text-sm" : "flex cursor-pointer gap-3 rounded-xl border border-[var(--app-border)] bg-white p-4 text-sm"}
               >
                 <input
                   type="radio"

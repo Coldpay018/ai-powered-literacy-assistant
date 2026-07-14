@@ -33,7 +33,7 @@ export function AssessmentResult({
       className={
         isDark
           ? "rounded-2xl border border-[#2B373B] bg-[#151D20] p-6 shadow-xl"
-          : "rounded-2xl border border-[#DDE3E0] bg-white p-6 shadow-xl"
+          : "rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 shadow-xl"
       }
     >
       <h1 className="text-2xl font-semibold tracking-tight">
@@ -42,7 +42,7 @@ export function AssessmentResult({
       <p className={isDark ? "mt-3 text-sm leading-6 text-[#A8B3B0]" : "mt-3 text-sm leading-6 text-[#667085]"}>
         {t("assessment.resultHelp")}
       </p>
-      <div className={isDark ? "mt-5 divide-y divide-[#2B373B]" : "mt-5 divide-y divide-[#DDE3E0]"}>
+      <div className={isDark ? "mt-5 divide-y divide-[#2B373B]" : "mt-5 divide-y divide-[var(--app-border)]"}>
         {rows.map(([label, value]) => (
           <div key={label} className="flex items-center justify-between gap-4 py-3">
             <p className="text-sm font-medium">{t(label)}</p>

@@ -66,6 +66,7 @@ class LessonPlayerApiTests(unittest.TestCase):
         )
         db.add(course)
         db.flush()
+        self.course_id = course.id
         module = models.CourseModule(
             course_id=course.id,
             title="Module One",
@@ -75,6 +76,7 @@ class LessonPlayerApiTests(unittest.TestCase):
         db.add(module)
         db.flush()
         self.lesson_ids = []
+        self.question_ids = []
         for order, title in [(1, "First Lesson"), (2, "Second Lesson")]:
             lesson = models.Lesson(
                 course_id=course.id,
@@ -125,6 +127,7 @@ class LessonPlayerApiTests(unittest.TestCase):
             )
             db.add(question)
             db.flush()
+            self.question_ids.append(question.id)
             db.add_all(
                 [
                     models.QuestionOption(
@@ -141,6 +144,81 @@ class LessonPlayerApiTests(unittest.TestCase):
                     ),
                 ]
             )
+
+        second_module = models.CourseModule(
+            course_id=course.id,
+            title="Module Two",
+            description="Second module",
+            sequence_order=2,
+        )
+        db.add(second_module)
+        db.flush()
+        lesson = models.Lesson(
+            course_id=course.id,
+            module_id=second_module.id,
+            title="Third Lesson",
+            description="Third lesson description",
+            content="Static lesson content",
+            skill="reading",
+            skill_type="reading",
+            difficulty_level="beginner",
+            proficiency_level="beginner",
+            language="en",
+            difficulty_order=3,
+            estimated_minutes=10,
+            estimated_duration_minutes=10,
+            sequence_order=1,
+        )
+        db.add(lesson)
+        db.flush()
+        self.module_two_lesson_id = lesson.id
+        block = models.LessonContent(
+            lesson_id=lesson.id,
+            content_type="text",
+            title="Read",
+            text_content="Read this short lesson.",
+            sequence_order=1,
+        )
+        quiz = models.LessonContent(
+            lesson_id=lesson.id,
+            content_type="quiz",
+            title="Quiz",
+            metadata_json='{"passing_score": 60}',
+            sequence_order=2,
+        )
+        db.add_all([block, quiz])
+        db.flush()
+        question = models.LessonQuestion(
+            lesson_id=lesson.id,
+            content_block_id=quiz.id,
+            question_text="What should you read?",
+            question_type="mcq",
+            skill="reading",
+            difficulty_level="beginner",
+            correct_answer="this short lesson",
+            explanation="The lesson says to read this short lesson.",
+            sequence_order=1,
+            points=1,
+        )
+        db.add(question)
+        db.flush()
+        self.question_ids.append(question.id)
+        db.add_all(
+            [
+                models.QuestionOption(
+                    question_id=question.id,
+                    option_text="this short lesson",
+                    is_correct=True,
+                    sequence_order=1,
+                ),
+                models.QuestionOption(
+                    question_id=question.id,
+                    option_text="another lesson",
+                    is_correct=False,
+                    sequence_order=2,
+                ),
+            ]
+        )
         db.commit()
         db.close()
 
@@ -161,6 +239,7 @@ class LessonPlayerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
+        self.assertTrue(data["is_unlocked"])
         self.assertFalse(data["locked"])
         self.assertEqual(data["progress"]["status"], "in_progress")
         self.assertEqual(data["progress"]["completion_status"], "in_progress")
@@ -203,10 +282,95 @@ class LessonPlayerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
+        self.assertFalse(data["is_unlocked"])
         self.assertTrue(data["locked"])
         self.assertEqual(data["content_blocks"], [])
         self.assertEqual(data["questions"], [])
         self.assertEqual(data["progress"]["completion_status"], "not_started")
+
+    def test_second_lesson_unlocks_after_first_completion(self):
+        token = self.token()
+        first_lesson = self.client.get(
+            f"/lessons/{self.lesson_ids[0]}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()
+        first_question_id = first_lesson["questions"][0]["id"]
+
+        complete_first = self.client.post(
+            f"/lessons/{self.lesson_ids[0]}/quiz/submit",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"answers": {str(first_question_id): "this short lesson"}},
+        )
+        self.assertEqual(complete_first.status_code, 200, complete_first.text)
+
+        response = self.client.get(
+            f"/lessons/{self.lesson_ids[1]}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertTrue(data["is_unlocked"])
+        self.assertFalse(data["locked"])
+        self.assertGreater(len(data["content_blocks"]), 0)
+
+    def test_next_module_unlocks_after_previous_module_completion(self):
+        token = self.token()
+        first_question_id = self.question_ids[0]
+        second_lesson = self.client.get(
+            f"/lessons/{self.lesson_ids[1]}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()
+        second_question_id = self.question_ids[1]
+
+        locked_before = self.client.get(
+            f"/lessons/{self.module_two_lesson_id}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(locked_before.status_code, 200, locked_before.text)
+        self.assertFalse(locked_before.json()["is_unlocked"])
+
+        complete_first = self.client.post(
+            f"/lessons/{self.lesson_ids[0]}/quiz/submit",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"answers": {str(first_question_id): "this short lesson"}},
+        )
+        self.assertEqual(complete_first.status_code, 200, complete_first.text)
+
+        still_locked = self.client.get(
+            f"/lessons/{self.module_two_lesson_id}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(still_locked.status_code, 200, still_locked.text)
+        self.assertFalse(still_locked.json()["is_unlocked"])
+
+        complete_second = self.client.post(
+            f"/lessons/{self.lesson_ids[1]}/quiz/submit",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"answers": {str(second_question_id): "this short lesson"}},
+        )
+        self.assertEqual(complete_second.status_code, 200, complete_second.text)
+
+        unlocked_next_module = self.client.get(
+            f"/lessons/{self.module_two_lesson_id}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(unlocked_next_module.status_code, 200, unlocked_next_module.text)
+        self.assertTrue(unlocked_next_module.json()["is_unlocked"])
+
+    def test_locked_lesson_writes_are_blocked(self):
+        token = self.token()
+
+        response = self.client.patch(
+            f"/lessons/{self.lesson_ids[1]}/progress",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "status": "in_progress",
+                "progress_percentage": 10,
+            },
+        )
+
+        self.assertEqual(response.status_code, 423, response.text)
 
     def test_quiz_submission_scores_and_completes_lesson(self):
         token = self.token()
@@ -227,6 +391,38 @@ class LessonPlayerApiTests(unittest.TestCase):
         self.assertEqual(data["score"], 100)
         self.assertTrue(data["passed"])
         self.assertEqual(data["progress"]["status"], "completed")
+
+    def test_flattened_course_sequence_diagnostic(self):
+        db = self.Session()
+        course = db.query(models.Course).filter(models.Course.id == self.course_id).first()
+        self.assertIsNotNone(course)
+        flattened = []
+        for module_order, module in enumerate(sorted(course.modules, key=lambda item: item.sequence_order), start=1):
+            for lesson_order, lesson in enumerate(sorted(module.lessons, key=lambda item: item.sequence_order), start=1):
+                print(f"{module_order}, {lesson_order}, {lesson.id}, {lesson.title}")
+                flattened.append((module_order, lesson_order, lesson.id, lesson.title))
+        self.assertEqual(flattened[0][1], 1)
+        db.close()
+
+    def test_dashboard_entry_uses_first_unlocked_lesson_for_new_user(self):
+        token = self.token()
+        course_response = self.client.get(f"/courses/{self.course_id}")
+        self.assertEqual(course_response.status_code, 200, course_response.text)
+        course = course_response.json()
+        first_module = course["modules"][0]
+        first_lesson_id = first_module["lessons"][0]["id"]
+
+        self.assertEqual(
+            [lesson["id"] for lesson in course["lessons"]],
+            [self.lesson_ids[0], self.lesson_ids[1], self.module_two_lesson_id],
+        )
+
+        lesson_response = self.client.get(
+            f"/lessons/{first_lesson_id}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(lesson_response.status_code, 200, lesson_response.text)
+        self.assertTrue(lesson_response.json()["is_unlocked"])
 
 
 if __name__ == "__main__":

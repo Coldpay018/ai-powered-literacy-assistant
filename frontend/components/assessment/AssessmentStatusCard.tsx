@@ -30,7 +30,7 @@ export function AssessmentStatusCard({
       : t("assessment.notCompleted");
 
   return (
-    <article className={isDark ? "rounded-2xl border border-[#2B373B] bg-[#1B2529] p-5 shadow-xl" : "rounded-2xl border border-[#DDE3E0] bg-white p-5 shadow-xl"}>
+    <article className={isDark ? "rounded-2xl border border-[#2B373B] bg-[#1B2529] p-5 shadow-xl" : "rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl"}>
       <p className="text-sm font-semibold text-[#2F7D73] dark:text-[#63B3A7]">
         {t("assessment.title")}
       </p>

@@ -1,4 +1,5 @@
 import type {
+  CourseDetail,
   LearnerProgress,
   LearningPlan,
   LessonPlayer,
@@ -38,6 +39,10 @@ async function request<T>(
 
 export function getLearningPlan(token: string) {
   return request<LearningPlan>("/learning-plan/me", token);
+}
+
+export function getCourseDetail(token: string, courseId: number) {
+  return request<CourseDetail>(`/courses/${courseId}`, token);
 }
 
 export function updateLessonProgress(

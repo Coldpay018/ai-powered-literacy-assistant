@@ -14,6 +14,7 @@ import models
 EmbeddingFn = Callable[[list[str]], list[list[float]]]
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 SKILL_LABELS = {"reading": "reading", "writing": "writing", "comprehension": "comprehension"}
+COURSE_ORDER = {"beginner": 1, "intermediate": 2, "advanced": 3}
 
 _model = None
 _lesson_embedding_cache: dict[tuple[int, str], list[float]] = {}
@@ -154,6 +155,8 @@ def _serialize_recommendation(
     progress: models.LearnerProgress | None,
 ) -> dict:
     lesson = recommendation.lesson
+    course = lesson.course
+    module_order = lesson.module.sequence_order if lesson.module else 0
     return {
         "lesson_id": lesson.id,
         "title": lesson.title,
@@ -161,6 +164,11 @@ def _serialize_recommendation(
         "skill_type": lesson.skill_type,
         "proficiency_level": lesson.proficiency_level,
         "language": lesson.language,
+        "course_id": lesson.course_id,
+        "course_title": course.title if course else "",
+        "course_order": COURSE_ORDER.get(course.proficiency_level if course else lesson.proficiency_level, 99),
+        "module_order": module_order,
+        "lesson_order": lesson.sequence_order,
         "estimated_duration_minutes": lesson.estimated_duration_minutes,
         "recommendation_score": round(float(recommendation.recommendation_score), 4),
         "recommendation_reason": recommendation.recommendation_reason,

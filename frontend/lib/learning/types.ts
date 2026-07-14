@@ -9,6 +9,11 @@ export type RecommendedLesson = {
   skill_type: SkillType;
   proficiency_level: ProficiencyLevel;
   language: string;
+  course_id: number;
+  course_title: string;
+  course_order: number;
+  module_order: number;
+  lesson_order: number;
   estimated_duration_minutes: number;
   recommendation_score: number;
   recommendation_reason: string;
@@ -98,6 +103,7 @@ export type LessonNavigationItem = {
   id: number;
   title: string;
   status: ProgressStatus;
+  is_unlocked: boolean;
   locked: boolean;
 };
 
@@ -120,6 +126,7 @@ export type LessonPlayer = {
   content_blocks: LessonContentBlock[];
   questions: LessonQuestion[];
   progress: LearnerProgress | null;
+  is_unlocked: boolean;
   locked: boolean;
   lock_reason: string | null;
   previous_lesson: LessonNavigationItem | null;
@@ -147,4 +154,25 @@ export type ProgressRecord = LearnerProgress & {
   lesson_title?: string;
   course_title?: string;
   module_title?: string;
+};
+
+export type CourseLessonSummary = {
+  id: number;
+  title: string;
+  sequence_order: number;
+  module_id: number | null;
+};
+
+export type CourseModuleSummary = {
+  id: number;
+  title: string;
+  sequence_order: number;
+  lessons: CourseLessonSummary[];
+};
+
+export type CourseDetail = {
+  id: number;
+  title: string;
+  modules: CourseModuleSummary[];
+  lessons: CourseLessonSummary[];
 };

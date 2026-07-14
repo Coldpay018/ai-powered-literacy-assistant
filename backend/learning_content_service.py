@@ -5,6 +5,14 @@ from sqlalchemy.orm import Session, selectinload
 
 import models
 from language_utils import normalize_language
+from question_taxonomy import (
+    clamp_difficulty,
+    normalize_age_group,
+    normalize_difficulty_value,
+    normalize_experience_level,
+    normalize_question_language,
+    normalize_question_type,
+)
 
 
 def validate_skill_filter(value: str | None) -> str | None:
@@ -73,6 +81,7 @@ def get_published_course(db: Session, course_id: int) -> models.Course:
         .options(
             selectinload(models.Course.modules)
             .selectinload(models.CourseModule.lessons),
+            selectinload(models.Course.lessons),
         )
         .filter(
             models.Course.id == course_id,
@@ -118,6 +127,8 @@ def get_published_lesson(db: Session, lesson_id: int) -> models.Lesson:
             selectinload(models.Lesson.questions).selectinload(models.LessonQuestion.options),
             selectinload(models.Lesson.course),
             selectinload(models.Lesson.module),
+            selectinload(models.Lesson.course).selectinload(models.Course.modules).selectinload(models.CourseModule.lessons),
+            selectinload(models.Lesson.course).selectinload(models.Course.lessons),
         )
         .filter(
             models.Lesson.id == lesson_id,
@@ -221,14 +232,52 @@ def serialize_question_option(option: models.QuestionOption) -> dict:
 
 
 def serialize_lesson_question(question: models.LessonQuestion) -> dict:
+    try:
+        normalized_question_type = normalize_question_type(question.question_type)
+    except ValueError:
+        normalized_question_type = question.question_type
+    try:
+        normalized_difficulty = clamp_difficulty(normalize_difficulty_value(question.difficulty_rating) or 1)
+    except ValueError:
+        normalized_difficulty = 1
+    try:
+        normalized_age_group = normalize_age_group(question.age_group) if question.age_group else None
+    except ValueError:
+        normalized_age_group = None
+    try:
+        normalized_experience_level = normalize_experience_level(question.experience_level) if question.experience_level else None
+    except ValueError:
+        normalized_experience_level = None
+    try:
+        normalized_comfortable_language = (
+            normalize_question_language(question.comfortable_language)
+            if question.comfortable_language
+            else None
+        )
+    except ValueError:
+        normalized_comfortable_language = None
+    try:
+        normalized_learning_language = (
+            normalize_question_language(question.learning_language)
+            if question.learning_language
+            else None
+        )
+    except ValueError:
+        normalized_learning_language = None
     return {
         "id": question.id,
+        "question_id": question.id,
         "lesson_id": question.lesson_id,
         "content_block_id": question.content_block_id,
         "question_text": question.question_text,
-        "question_type": question.question_type,
+        "question_type": normalized_question_type,
         "skill": question.skill,
         "difficulty_level": question.difficulty_level,
+        "difficulty_rating": normalized_difficulty,
+        "age_group": normalized_age_group,
+        "experience_level": normalized_experience_level,
+        "comfortable_language": normalized_comfortable_language,
+        "learning_language": normalized_learning_language,
         "minimum_age": question.minimum_age,
         "maximum_age": question.maximum_age,
         "explanation": question.explanation,
@@ -258,6 +307,42 @@ def serialize_module_detail(module: models.CourseModule) -> dict:
     }
 
 
+def _ordered_course_lessons(course: models.Course) -> list[models.Lesson]:
+    ordered_lessons: list[models.Lesson] = []
+
+    modules = sorted(
+        [module for module in course.modules if module.is_published],
+        key=lambda module: (
+            module.sequence_order if module.sequence_order is not None else 0,
+            module.title or "",
+        ),
+    )
+    for module in modules:
+        module_lessons = sorted(
+            [lesson for lesson in module.lessons if lesson.is_active and lesson.is_published],
+            key=lambda lesson: (
+                lesson.sequence_order if lesson.sequence_order is not None else 0,
+                lesson.title or "",
+            ),
+        )
+        ordered_lessons.extend(module_lessons)
+
+    standalone_lessons = sorted(
+        [
+            lesson
+            for lesson in course.lessons
+            if lesson.is_active and lesson.is_published and lesson.module_id is None
+        ],
+        key=lambda lesson: (
+            lesson.sequence_order if lesson.sequence_order is not None else 0,
+            lesson.title or "",
+        ),
+    )
+    ordered_lessons.extend(standalone_lessons)
+
+    return ordered_lessons
+
+
 def serialize_course_detail(course: models.Course) -> dict:
     published_modules = [module for module in course.modules if module.is_published]
     return {
@@ -266,6 +351,7 @@ def serialize_course_detail(course: models.Course) -> dict:
             serialize_module_detail(module)
             for module in sorted(published_modules, key=lambda item: item.sequence_order)
         ],
+        "lessons": [serialize_lesson_summary(lesson) for lesson in _ordered_course_lessons(course)],
         "created_at": course.created_at,
         "updated_at": course.updated_at,
     }

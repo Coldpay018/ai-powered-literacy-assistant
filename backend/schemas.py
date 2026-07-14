@@ -8,8 +8,24 @@ from language_utils import normalize_language as normalize_language_value
 
 UserRole = Literal["learner", "educator", "administrator"]
 ExperienceLevel = Literal["Beginner", "Intermediate", "Advanced"]
+AgeGroup = Literal["Child", "Teenager", "Adult"]
+TranslationSupport = Literal["high", "medium", "minimal"]
+SentenceLength = Literal["short", "medium", "long"]
+VocabularyComplexity = Literal["simple", "mixed", "advanced"]
+GrammarDepth = Literal["light", "moderate", "deep"]
+QuestionComplexity = Literal["simple", "mixed", "complex"]
 SkillType = Literal["reading", "writing", "comprehension"]
 ProficiencyLevel = Literal["beginner", "intermediate", "advanced"]
+QuestionSkill = Literal["reading", "writing", "grammar", "vocabulary", "listening", "speaking", "comprehension"]
+LessonQuestionType = Literal[
+    "multiple_choice",
+    "fill_in_the_blank",
+    "sentence_ordering",
+    "reading_comprehension",
+    "typing_writing",
+    "speaking",
+    "listening",
+]
 ProgressStatus = Literal["not_started", "in_progress", "completed"]
 ContentType = Literal[
     "text",
@@ -24,14 +40,6 @@ ContentType = Literal[
     "read_aloud",
     "dictation",
     "quiz",
-]
-LessonQuestionType = Literal[
-    "mcq",
-    "true_false",
-    "short_answer",
-    "fill_blank",
-    "matching",
-    "sequence",
 ]
 SUPPORTED_LANGUAGES = {"en", "hi", "ta", "te"}
 
@@ -164,11 +172,18 @@ class AssessmentOptionResponse(BaseModel):
 
 
 class AssessmentQuestionResponse(BaseModel):
+    question_id: int
     attempt_question_id: int
     section: str
     display_order: int
-    question_type: str
+    question_type: LessonQuestionType
     difficulty: str
+    difficulty_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    skill: Optional[QuestionSkill] = None
+    age_group: Optional[AgeGroup] = None
+    experience_level: Optional[ExperienceLevel] = None
+    comfortable_language: Optional[str] = None
+    learning_language: Optional[str] = None
     passage: Optional[str] = None
     prompt: str
     options: Optional[list[AssessmentOptionResponse]] = None
@@ -216,6 +231,7 @@ class AssessmentResultResponse(BaseModel):
     mcq_score: float
     overall_score: float
     proficiency_level: str
+    difficulty_adjustments: list["AdaptiveDifficultyResponse"] = Field(default_factory=list)
 
 
 class CourseResponse(BaseModel):
@@ -282,6 +298,7 @@ class LessonResponse(BaseModel):
     xp_reward: int
     is_published: bool
     is_active: bool
+    is_unlocked: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 
@@ -346,6 +363,7 @@ class QuestionOptionResponse(BaseModel):
 
 
 class LessonQuestionResponse(BaseModel):
+    question_id: int
     id: int
     lesson_id: int
     content_block_id: Optional[int] = None
@@ -353,6 +371,11 @@ class LessonQuestionResponse(BaseModel):
     question_type: LessonQuestionType
     skill: SkillType
     difficulty_level: ProficiencyLevel
+    difficulty_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    age_group: Optional[AgeGroup] = None
+    experience_level: Optional[ExperienceLevel] = None
+    comfortable_language: Optional[str] = None
+    learning_language: Optional[str] = None
     minimum_age: int
     maximum_age: int
     explanation: Optional[str] = None
@@ -382,6 +405,7 @@ class LearnerQuestionOptionResponse(BaseModel):
 
 
 class LearnerLessonQuestionResponse(BaseModel):
+    question_id: int
     id: int
     lesson_id: int
     content_block_id: Optional[int] = None
@@ -389,6 +413,11 @@ class LearnerLessonQuestionResponse(BaseModel):
     question_type: LessonQuestionType
     skill: SkillType
     difficulty_level: ProficiencyLevel
+    difficulty_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    age_group: Optional[AgeGroup] = None
+    experience_level: Optional[ExperienceLevel] = None
+    comfortable_language: Optional[str] = None
+    learning_language: Optional[str] = None
     minimum_age: int
     maximum_age: int
     explanation: Optional[str] = None
@@ -453,6 +482,7 @@ class LessonNavigationItem(BaseModel):
     id: int
     title: str
     status: ProgressStatus
+    is_unlocked: bool
     locked: bool
 
 
@@ -484,6 +514,7 @@ class LessonPlayerProgressResponse(BaseModel):
 
 class LessonPlayerResponse(LessonDetailResponse):
     progress: Optional[LessonPlayerProgressResponse] = None
+    is_unlocked: bool
     locked: bool
     lock_reason: Optional[str] = None
     previous_lesson: Optional[LessonNavigationItem] = None
@@ -533,6 +564,7 @@ class CourseSummaryResponse(BaseModel):
 
 class CourseDetailResponse(CourseSummaryResponse):
     modules: list[ModuleDetailResponse] = Field(default_factory=list)
+    lessons: list[LessonSummaryResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -609,6 +641,7 @@ class LessonQuizSubmitResponse(BaseModel):
     passed: bool
     progress: LearnerProgressResponse
     results: list[LessonQuizQuestionResult]
+    difficulty_adjustments: list["AdaptiveDifficultyResponse"] = Field(default_factory=list)
 
 
 class RecommendedLessonResponse(BaseModel):
@@ -618,6 +651,11 @@ class RecommendedLessonResponse(BaseModel):
     skill_type: SkillType
     proficiency_level: ProficiencyLevel
     language: str
+    course_id: int
+    course_title: str
+    course_order: int
+    module_order: int
+    lesson_order: int
     estimated_duration_minutes: int
     recommendation_score: float
     recommendation_reason: str
@@ -639,3 +677,79 @@ class PersonalizedLearningPlanResponse(BaseModel):
     recommended_lessons: list[RecommendedLessonResponse]
     completion_summary: CompletionSummaryResponse
     suggested_next_lesson: Optional[RecommendedLessonResponse] = None
+
+
+class PersonalizationPerformanceResponse(BaseModel):
+    total_lessons: int
+    completed_lessons: int
+    in_progress_lessons: int
+    questions_attempted: int
+    correct_answers: int
+    incorrect_answers: int
+    average_score: float
+    best_score: float
+    recent_score: float
+    current_difficulty: ProficiencyLevel
+    last_accessed_at: Optional[datetime] = None
+
+
+class PersonalizationSkillProfileResponse(BaseModel):
+    skill: str
+    current_skill: ProficiencyLevel
+    current_difficulty: ProficiencyLevel
+    content_tone: str
+    sentence_length: SentenceLength
+    vocabulary_complexity: VocabularyComplexity
+    preferred_topics: list[str]
+    translation_support: TranslationSupport
+    grammar_depth: GrammarDepth
+    question_complexity: QuestionComplexity
+    example_style: str
+    comfortable_language: str
+    learning_language: str
+    previous_performance: PersonalizationPerformanceResponse
+
+
+class PersonalizationProfileResponse(BaseModel):
+    age: int
+    age_group: AgeGroup
+    experience_level: ExperienceLevel
+    comfortable_language: str
+    learning_language: str
+    current_skill: ProficiencyLevel
+    current_difficulty: ProficiencyLevel
+    content_tone: str
+    sentence_length: SentenceLength
+    vocabulary_complexity: VocabularyComplexity
+    preferred_topics: list[str]
+    translation_support: TranslationSupport
+    grammar_depth: GrammarDepth
+    question_complexity: QuestionComplexity
+    example_style: str
+    previous_performance: PersonalizationPerformanceResponse
+    skill_profiles: dict[str, PersonalizationSkillProfileResponse] = Field(default_factory=dict)
+
+
+class StartingDifficultyResponse(BaseModel):
+    user_id: int
+    age: int
+    age_group: AgeGroup
+    experience_level: ExperienceLevel
+    comfortable_language: str
+    learning_language: str
+    requested_skill: Optional[QuestionSkill] = None
+    starting_difficulty: int = Field(..., ge=1, le=5)
+    skill_difficulties: dict[QuestionSkill, int] = Field(default_factory=dict)
+    source: str
+
+
+class AdaptiveDifficultyResponse(BaseModel):
+    skill: QuestionSkill
+    previous_difficulty: int = Field(..., ge=1, le=5)
+    new_difficulty: int = Field(..., ge=1, le=5)
+    correct_streak: int = Field(..., ge=0)
+    incorrect_streak: int = Field(..., ge=0)
+    rolling_accuracy: float = Field(..., ge=0, le=1)
+    adjusted: bool
+    reason: str
+    updated_at: datetime

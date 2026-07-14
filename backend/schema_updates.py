@@ -16,12 +16,18 @@ def _columns(engine: Engine, table_name: str) -> list[dict]:
     return inspect(engine).get_columns(table_name)
 
 
+def _table_exists(engine: Engine, table_name: str) -> bool:
+    return table_name in inspect(engine).get_table_names()
+
+
 def _add_column_if_missing(
     engine: Engine,
     table_name: str,
     column_name: str,
     ddl: str,
 ) -> None:
+    if not _table_exists(engine, table_name):
+        return
     if column_name in _column_names(engine, table_name):
         return
 
@@ -200,6 +206,43 @@ def apply_sqlite_schema_updates(engine: Engine) -> None:
     for column_name, ddl in progress_columns.items():
         _add_column_if_missing(engine, "learner_progress", column_name, ddl)
 
+    _add_column_if_missing(engine, "lesson_attempts", "submission_hash", "submission_hash VARCHAR(128)")
+
+    if not _table_exists(engine, "learner_skill_difficulties"):
+        _execute(
+            engine,
+            "CREATE TABLE IF NOT EXISTS learner_skill_difficulties ("
+            "id INTEGER PRIMARY KEY, "
+            "user_id INTEGER NOT NULL REFERENCES users(id), "
+            "skill VARCHAR(30) NOT NULL, "
+            "current_difficulty INTEGER NOT NULL DEFAULT 1, "
+            "correct_streak INTEGER NOT NULL DEFAULT 0, "
+            "incorrect_streak INTEGER NOT NULL DEFAULT 0, "
+            "recent_response_history_json TEXT NOT NULL DEFAULT '[]', "
+            "rolling_accuracy FLOAT NOT NULL DEFAULT 0, "
+            "last_adjustment_reason VARCHAR(100), "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "CONSTRAINT uq_learner_skill_difficulty_user_skill UNIQUE (user_id, skill)"
+            ")",
+        )
+
+    question_columns = {
+        "difficulty_rating": "difficulty_rating INTEGER",
+        "age_group": "age_group VARCHAR(20)",
+        "experience_level": "experience_level VARCHAR(30)",
+        "comfortable_language": "comfortable_language VARCHAR(10)",
+        "learning_language": "learning_language VARCHAR(10)",
+        "skill": "skill VARCHAR(30)",
+    }
+    if _table_exists(engine, "assessment_questions"):
+        for column_name, ddl in question_columns.items():
+            _add_column_if_missing(engine, "assessment_questions", column_name, ddl)
+    if _table_exists(engine, "lesson_questions"):
+        for column_name, ddl in question_columns.items():
+            if column_name != "skill":
+                _add_column_if_missing(engine, "lesson_questions", column_name, ddl)
+
     index_statements = [
         "CREATE INDEX IF NOT EXISTS ix_courses_skill ON courses(skill)",
         "CREATE INDEX IF NOT EXISTS ix_courses_difficulty_level ON courses(difficulty_level)",
@@ -212,6 +255,33 @@ def apply_sqlite_schema_updates(engine: Engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_lessons_module_published_order ON lessons(module_id, is_published, sequence_order)",
         "CREATE INDEX IF NOT EXISTS ix_learner_progress_last_content_block_id ON learner_progress(last_content_block_id)",
     ]
+    if _table_exists(engine, "lesson_attempts"):
+        index_statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_lesson_attempts_submission_hash ON lesson_attempts(user_id, lesson_id, submission_hash)"
+        )
+    if _table_exists(engine, "learner_skill_difficulties"):
+        index_statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_learner_skill_difficulties_user_skill ON learner_skill_difficulties(user_id, skill)"
+        )
+    if _table_exists(engine, "assessment_questions"):
+        index_statements.extend(
+            [
+                "CREATE INDEX IF NOT EXISTS ix_assessment_questions_difficulty_rating ON assessment_questions(difficulty_rating)",
+                "CREATE INDEX IF NOT EXISTS ix_assessment_questions_skill ON assessment_questions(skill)",
+                "CREATE INDEX IF NOT EXISTS ix_assessment_questions_age_group ON assessment_questions(age_group)",
+                "CREATE INDEX IF NOT EXISTS ix_assessment_questions_experience_level ON assessment_questions(experience_level)",
+                "CREATE INDEX IF NOT EXISTS ix_assessment_questions_languages ON assessment_questions(comfortable_language, learning_language)",
+            ]
+        )
+    if _table_exists(engine, "lesson_questions"):
+        index_statements.extend(
+            [
+                "CREATE INDEX IF NOT EXISTS ix_lesson_questions_difficulty_rating ON lesson_questions(difficulty_rating)",
+                "CREATE INDEX IF NOT EXISTS ix_lesson_questions_age_group ON lesson_questions(age_group)",
+                "CREATE INDEX IF NOT EXISTS ix_lesson_questions_experience_level ON lesson_questions(experience_level)",
+                "CREATE INDEX IF NOT EXISTS ix_lesson_questions_languages ON lesson_questions(comfortable_language, learning_language)",
+            ]
+        )
     for statement in index_statements:
         _execute(engine, statement)
 
@@ -299,3 +369,96 @@ def apply_sqlite_schema_updates(engine: Engine) -> None:
                 "AND experience_level = 'Beginner'",
             )
         _mark_migration_applied(engine, cleanup_marker, now)
+
+    question_framework_marker = "phase6_question_framework_backfill_v1"
+    if _table_exists(engine, "assessment_questions") and _table_exists(engine, "lesson_questions") and not _has_migration_marker(engine, question_framework_marker):
+        _execute(
+            engine,
+            "UPDATE assessment_questions SET "
+            "difficulty_rating = CASE "
+            "WHEN section = 'reading' AND difficulty = 'beginner' THEN 1 "
+            "WHEN section = 'reading' AND difficulty = 'intermediate' THEN 2 "
+            "WHEN section = 'reading' AND difficulty = 'advanced' THEN 4 "
+            "WHEN section = 'typing' AND difficulty = 'beginner' THEN 2 "
+            "WHEN section = 'typing' AND difficulty = 'intermediate' THEN 3 "
+            "WHEN section = 'typing' AND difficulty = 'advanced' THEN 5 "
+            "WHEN section = 'mcq' AND difficulty = 'beginner' THEN 1 "
+            "WHEN section = 'mcq' AND difficulty = 'intermediate' THEN 4 "
+            "WHEN section = 'mcq' AND difficulty = 'advanced' THEN 5 "
+            "ELSE COALESCE(difficulty_rating, 3) END "
+            "WHERE difficulty_rating IS NULL OR difficulty_rating < 1 OR difficulty_rating > 5",
+        )
+        _execute(
+            engine,
+            "UPDATE assessment_questions SET "
+            "age_group = CASE "
+            "WHEN difficulty = 'beginner' THEN 'Child' "
+            "WHEN difficulty = 'intermediate' THEN 'Teenager' "
+            "WHEN difficulty = 'advanced' THEN 'Adult' "
+            "ELSE COALESCE(age_group, 'Teenager') END "
+            "WHERE age_group IS NULL OR TRIM(age_group) = ''",
+        )
+        _execute(
+            engine,
+            "UPDATE assessment_questions SET "
+            "experience_level = CASE "
+            "WHEN difficulty = 'beginner' THEN 'Beginner' "
+            "WHEN difficulty = 'intermediate' THEN 'Intermediate' "
+            "WHEN difficulty = 'advanced' THEN 'Advanced' "
+            "ELSE COALESCE(experience_level, 'Beginner') END "
+            "WHERE experience_level IS NULL OR TRIM(experience_level) = ''",
+        )
+        _execute(
+            engine,
+            "UPDATE assessment_questions SET comfortable_language = language, learning_language = language "
+            "WHERE comfortable_language IS NULL OR TRIM(comfortable_language) = '' "
+            "OR learning_language IS NULL OR TRIM(learning_language) = ''",
+        )
+        _execute(
+            engine,
+            "UPDATE assessment_questions SET skill = CASE "
+            "WHEN skill_tag IN ('word recognition', 'literal comprehension', 'passage comprehension') THEN 'reading' "
+            "WHEN skill_tag IN ('copy accuracy', 'short response') THEN 'writing' "
+            "WHEN skill_tag IN ('sentence completion', 'sentence meaning') THEN 'grammar' "
+            "WHEN skill_tag = 'vocabulary' THEN 'vocabulary' "
+            "WHEN skill_tag = 'basic comprehension' THEN 'comprehension' "
+            "ELSE COALESCE(skill, 'comprehension') END "
+            "WHERE skill IS NULL OR TRIM(skill) = ''",
+        )
+        _execute(
+            engine,
+            "UPDATE lesson_questions SET "
+            "difficulty_rating = CASE "
+            "WHEN difficulty_level = 'beginner' THEN 1 "
+            "WHEN difficulty_level = 'intermediate' THEN 3 "
+            "WHEN difficulty_level = 'advanced' THEN 5 "
+            "ELSE COALESCE(difficulty_rating, 2) END "
+            "WHERE difficulty_rating IS NULL OR difficulty_rating < 1 OR difficulty_rating > 5",
+        )
+        _execute(
+            engine,
+            "UPDATE lesson_questions SET "
+            "age_group = CASE "
+            "WHEN minimum_age <= 12 THEN 'Child' "
+            "WHEN minimum_age <= 17 THEN 'Teenager' "
+            "ELSE 'Adult' END "
+            "WHERE age_group IS NULL OR TRIM(age_group) = ''",
+        )
+        _execute(
+            engine,
+            "UPDATE lesson_questions SET "
+            "experience_level = CASE "
+            "WHEN difficulty_level = 'beginner' THEN 'Beginner' "
+            "WHEN difficulty_level = 'intermediate' THEN 'Intermediate' "
+            "WHEN difficulty_level = 'advanced' THEN 'Advanced' "
+            "ELSE COALESCE(experience_level, 'Beginner') END "
+            "WHERE experience_level IS NULL OR TRIM(experience_level) = ''",
+        )
+        _execute(
+            engine,
+            "UPDATE lesson_questions SET comfortable_language = (SELECT language FROM lessons WHERE lessons.id = lesson_questions.lesson_id), "
+            "learning_language = (SELECT language FROM lessons WHERE lessons.id = lesson_questions.lesson_id) "
+            "WHERE comfortable_language IS NULL OR TRIM(comfortable_language) = '' "
+            "OR learning_language IS NULL OR TRIM(learning_language) = ''",
+        )
+        _mark_migration_applied(engine, question_framework_marker, now)

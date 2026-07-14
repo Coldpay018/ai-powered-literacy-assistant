@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { AssessmentStatusCard } from "@/components/assessment/AssessmentStatusCard";
 import { HeroBookIllustration, LiteracyIcon, type LiteracyIconName } from "@/components/ui/LiteracyIllustrations";
 import { ProgressRing } from "@/components/ui/ProgressRing";
@@ -64,6 +65,16 @@ function formatProgressStatus(status: ProgressStatus, t: Translate) {
   return t("assessment.notCompleted");
 }
 
+function compareLessonOrder(left: RecommendedLesson, right: RecommendedLesson) {
+  return (
+    left.course_order - right.course_order ||
+    left.course_title.localeCompare(right.course_title) ||
+    left.module_order - right.module_order ||
+    left.lesson_order - right.lesson_order ||
+    left.title.localeCompare(right.title)
+  );
+}
+
 function LessonCard({
   lesson,
   isDark,
@@ -82,40 +93,41 @@ function LessonCard({
       className={
         isDark
           ? "odyssey-card flex h-full min-w-0 max-w-full flex-col rounded-3xl border border-white/10 bg-white/6 p-4"
-          : "odyssey-card flex h-full min-w-0 max-w-full flex-col rounded-3xl border border-[#DDEAE5] bg-white p-4 shadow-lg shadow-slate-900/5"
+          : "odyssey-card flex h-full min-w-0 max-w-full flex-col rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-lg shadow-slate-900/5"
       }
     >
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <span className={isDark ? "grid h-14 w-14 place-items-center rounded-2xl bg-white/8" : "grid h-14 w-14 place-items-center rounded-2xl bg-[#E9F8F4]"}>
+        <span className={isDark ? "grid h-14 w-14 place-items-center rounded-2xl bg-white/8" : "grid h-14 w-14 place-items-center rounded-2xl bg-[var(--app-surface-muted)]"}>
           <LiteracyIcon name={lesson.skill_type === "writing" ? "write" : lesson.skill_type === "comprehension" ? "comprehension" : "book"} className="h-8 w-8 transition group-hover:scale-105" />
         </span>
-        <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[#EEF8F4] px-3 py-1 text-xs font-black text-[#0F766E]"}>
+        <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-xs font-black text-[#0F766E]"}>
           {formatProgressStatus(lesson.current_progress_status, t)}
         </span>
       </div>
       <h3 className="break-words text-base font-black tracking-normal">{lesson.title}</h3>
-      <p className={isDark ? "mt-2 line-clamp-3 text-sm leading-6 text-teal-50/66" : "mt-2 line-clamp-3 text-sm leading-6 text-[#60746F]"}>
+      <p className={isDark ? "mt-2 line-clamp-3 text-sm leading-6 text-teal-50/66" : "mt-2 line-clamp-3 text-sm leading-6 text-[#667085]"}>
         {lesson.description}
       </p>
+      <p className={isDark ? "mt-2 line-clamp-3 text-xs leading-5 text-teal-50/55" : "mt-2 line-clamp-3 text-xs leading-5 text-[#667085]"}>{lesson.recommendation_reason}</p>
       <div className="mb-5 mt-4 flex flex-wrap gap-2 text-xs font-black">
-        <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[#F4F1E7] px-3 py-1 text-[#60746F]"}>
+        <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-[#667085]"}>
           {formatSkill(lesson.skill_type, t)}
         </span>
-        <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[#F4F1E7] px-3 py-1 text-[#60746F]"}>
+        <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-[#667085]"}>
           {lesson.estimated_duration_minutes} min
         </span>
       </div>
       <button
         type="button"
         onClick={() => onLessonAction(lesson)}
-        disabled={updatingLessonId === lesson.lesson_id || lesson.current_progress_status === "completed"}
+        disabled={updatingLessonId === lesson.lesson_id}
         className="group mt-auto rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-4 py-3 text-sm font-black text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {lesson.current_progress_status === "not_started"
           ? t("learning.startLesson")
           : lesson.current_progress_status === "in_progress"
             ? t("learning.markComplete")
-            : t("assessment.completed")}
+            : t("learning.completed")}
         <ArrowIcon />
       </button>
     </article>
@@ -133,13 +145,19 @@ function RecommendedLearningPath({
 }) {
   const cardClass = isDark
     ? "rounded-3xl border border-white/10 bg-[#0D1D2F]/82 p-5 shadow-2xl shadow-black/20"
-    : "rounded-3xl border border-[#DDEAE5] bg-white/92 p-5 shadow-xl shadow-slate-900/6";
+    : "rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
+  const orderedLessons = useMemo(
+    () => [...(state.learningPlan?.recommended_lessons || [])].sort(compareLessonOrder),
+    [state.learningPlan?.recommended_lessons],
+  );
+  const suggestedLesson =
+    orderedLessons.find((lesson) => lesson.current_progress_status !== "completed") || orderedLessons[0] || null;
 
   if (state.isLearningPlanLoading) {
     return (
       <section className={`${cardClass} min-w-0 max-w-full`}>
         <h2 className="break-words text-lg font-black tracking-normal">{t("learning.recommendedPath")}</h2>
-        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("learning.loading")}</p>
+        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("learning.loading")}</p>
       </section>
     );
   }
@@ -160,7 +178,7 @@ function RecommendedLearningPath({
     return (
       <section className={`${cardClass} min-w-0 max-w-full`}>
         <h2 className="break-words text-lg font-black tracking-normal">{t("learning.recommendedPath")}</h2>
-        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("learning.empty")}</p>
+        <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("learning.empty")}</p>
       </section>
     );
   }
@@ -173,20 +191,20 @@ function RecommendedLearningPath({
             {t("learning.recommendedPath")}
           </p>
           <h2 className="mt-1 break-words text-xl font-black tracking-normal">
-            {state.learningPlan.suggested_next_lesson?.title || t("learning.nextLesson")}
+            {suggestedLesson?.title || t("learning.nextLesson")}
           </h2>
         </div>
         <div className="flex min-w-0 flex-wrap gap-2 text-xs font-black">
-          <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[#EEF8F4] px-3 py-1 text-[#0F766E]"}>
+          <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-[#0F766E]"}>
             {t("learning.weakestSkill")}: {formatSkill(state.learningPlan.weakest_skill, t)}
           </span>
-          <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[#EEF8F4] px-3 py-1 text-[#0F766E]"}>
+          <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-[#0F766E]"}>
             {t("learning.completed")}: {state.learningPlan.completion_summary.completed_lessons_count}/{state.learningPlan.completion_summary.total_recommended_lessons}
           </span>
         </div>
       </div>
       <div className="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-4 md:grid-cols-2">
-        {state.learningPlan.recommended_lessons.map((lesson) => (
+        {orderedLessons.map((lesson) => (
           <LessonCard
             key={lesson.lesson_id}
             lesson={lesson}
@@ -224,11 +242,11 @@ export function DashboardOverview(props: DashboardOverviewProps) {
       : t("common.prototypeData");
   const cardClass = isDark
     ? "odyssey-card rounded-3xl border border-white/10 bg-[#0D1D2F]/82 p-5 shadow-2xl shadow-black/20"
-    : "odyssey-card rounded-3xl border border-[#DDEAE5] bg-white/92 p-5 shadow-xl shadow-slate-900/6";
+    : "odyssey-card rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
 
   return (
     <div className="min-w-0 max-w-full space-y-5">
-      <section className={isDark ? "rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#0D1D2F] to-[#083A3A] p-5 shadow-2xl shadow-black/20 md:p-7" : "rounded-[2rem] border border-white/80 bg-gradient-to-br from-white to-[#E9F8F4] p-5 shadow-xl shadow-slate-900/8 md:p-7"}>
+      <section className={isDark ? "rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#0D1D2F] to-[#083A3A] p-5 shadow-2xl shadow-black/20 md:p-7" : "rounded-[2rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/8 md:p-7"}>
         <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-center">
           <div className="min-w-0">
             <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>
@@ -237,7 +255,7 @@ export function DashboardOverview(props: DashboardOverviewProps) {
             <h2 className="mt-2 break-words text-3xl font-black tracking-normal md:text-4xl">
               Good to see you, {profile?.full_name || email || "User"}.
             </h2>
-            <p className={isDark ? "mt-3 max-w-2xl text-sm leading-6 text-teal-50/66" : "mt-3 max-w-2xl text-sm leading-6 text-[#60746F]"}>
+            <p className={isDark ? "mt-3 max-w-2xl text-sm leading-6 text-teal-50/66" : "mt-3 max-w-2xl text-sm leading-6 text-[#667085]"}>
               {t("auth.heroDescription")}
             </p>
           </div>
@@ -254,13 +272,13 @@ export function DashboardOverview(props: DashboardOverviewProps) {
       <section className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {prototypeData.summaryCards.map((card) => (
           <article key={card.labelKey} className={cardClass}>
-            <p className={isDark ? "text-sm font-bold text-teal-50/64" : "text-sm font-bold text-[#60746F]"}>{t(card.labelKey)}</p>
+            <p className={isDark ? "text-sm font-bold text-teal-50/64" : "text-sm font-bold text-[#667085]"}>{t(card.labelKey)}</p>
             <p className="mt-3 text-4xl font-black tracking-normal">{card.valueKey ? t(card.valueKey) : card.value}</p>
             <p className={isDark ? "mt-2 text-sm font-bold text-[#63D8C8]" : "mt-2 text-sm font-bold text-[#0F766E]"}>{t(card.detailKey)}</p>
           </article>
         ))}
         <article className={cardClass}>
-          <p className={isDark ? "text-sm font-bold text-teal-50/64" : "text-sm font-bold text-[#60746F]"}>{t("assessment.currentLevel")}</p>
+          <p className={isDark ? "text-sm font-bold text-teal-50/64" : "text-sm font-bold text-[#667085]"}>{t("assessment.currentLevel")}</p>
           <p className="mt-3 text-2xl font-black tracking-normal">{currentLevel}</p>
           <p className={isDark ? "mt-2 text-sm font-bold text-[#63D8C8]" : "mt-2 text-sm font-bold text-[#0F766E]"}>
             {assessmentResult ? t("assessment.completed") : t("common.prototypeData")}
@@ -274,7 +292,7 @@ export function DashboardOverview(props: DashboardOverviewProps) {
             <div className="mb-5 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-black tracking-normal">{t("dashboard.skillProgress")}</h2>
-                <p className={isDark ? "mt-1 text-sm text-teal-50/62" : "mt-1 text-sm text-[#60746F]"}>
+                <p className={isDark ? "mt-1 text-sm text-teal-50/62" : "mt-1 text-sm text-[#667085]"}>
                   {t("dashboard.skillProgressHelp")}
                 </p>
               </div>
@@ -317,14 +335,14 @@ export function DashboardOverview(props: DashboardOverviewProps) {
           </div>
 
           <article className={cardClass}>
-            <span className={isDark ? "grid h-16 w-16 place-items-center rounded-3xl bg-white/8" : "grid h-16 w-16 place-items-center rounded-3xl bg-[#E9F8F4]"}>
+            <span className={isDark ? "grid h-16 w-16 place-items-center rounded-3xl bg-white/8" : "grid h-16 w-16 place-items-center rounded-3xl bg-[var(--app-surface-muted)]"}>
               <LiteracyIcon name="lightbulb" className="h-10 w-10" />
             </span>
             <p className={isDark ? "mt-5 text-sm font-black text-[#63D8C8]" : "mt-5 text-sm font-black text-[#0F766E]"}>
               {t("dashboard.recommendedActivity")}
             </p>
             <h2 className="mt-2 text-xl font-black tracking-normal">{t("dashboard.readAndMatch")}</h2>
-            <p className={isDark ? "mt-3 text-sm leading-6 text-teal-50/66" : "mt-3 text-sm leading-6 text-[#60746F]"}>
+            <p className={isDark ? "mt-3 text-sm leading-6 text-teal-50/66" : "mt-3 text-sm leading-6 text-[#667085]"}>
               {t("dashboard.readAndMatchDescription")}
             </p>
             <button
@@ -341,11 +359,11 @@ export function DashboardOverview(props: DashboardOverviewProps) {
 
       <section className={cardClass}>
         <h2 className="text-lg font-black tracking-normal">{t("dashboard.recentActivity")}</h2>
-        <div className={isDark ? "mt-4 divide-y divide-white/10" : "mt-4 divide-y divide-[#DDEAE5]"}>
+        <div className={isDark ? "mt-4 divide-y divide-white/10" : "mt-4 divide-y divide-[var(--app-border)]"}>
           {prototypeData.recentActivities.map((activity, index) => (
             <div key={activity} className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm font-bold">{t(activity)}</p>
-              <p className={isDark ? "text-sm text-teal-50/62" : "text-sm text-[#60746F]"}>
+              <p className={isDark ? "text-sm text-teal-50/62" : "text-sm text-[#667085]"}>
                 {t("dashboard.sessionCompleted", { number: index + 1 })}
               </p>
             </div>

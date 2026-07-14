@@ -27,8 +27,14 @@ import type {
 import {
   getLearningPlan,
   getProgressRecords,
+  getCourseDetail,
 } from "@/lib/learning/api";
+import {
+  resolveCourseEntryLessonId,
+  resolveMostRecentInProgressLessonId,
+} from "@/lib/learning/entry";
 import type {
+  CourseDetail,
   LearningPlan,
   ProgressRecord,
   RecommendedLesson,
@@ -37,6 +43,7 @@ import {
   clearStoredUiLanguage,
   normalizeLanguage,
 } from "@/lib/i18n/types";
+import { applyDocumentTheme } from "@/lib/theme";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { API_BASE_URL } from "@/lib/api/config";
 
@@ -178,12 +185,17 @@ export default function Dashboard() {
     useState<AssessmentResult | null>(null);
   const [assessmentError, setAssessmentError] = useState("");
   const [learningPlan, setLearningPlan] = useState<LearningPlan | null>(null);
+  const [courseDetailsById, setCourseDetailsById] = useState<Record<number, CourseDetail>>({});
   const [isLearningPlanLoading, setIsLearningPlanLoading] = useState(false);
   const [learningPlanError, setLearningPlanError] = useState("");
   const [updatingLessonId] = useState<number | null>(null);
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [progressError, setProgressError] = useState("");
+
+  useEffect(() => {
+    applyDocumentTheme(theme);
+  }, [theme]);
 
   const syncProfileForm = useCallback((nextProfile: UserProfile) => {
     setProfileForm({
@@ -316,6 +328,23 @@ export default function Dashboard() {
     [handleUnauthorizedProfile, router, t],
   );
 
+  const ensureCourseDetail = useCallback(
+    async (token: string, courseId: number) => {
+      const cachedCourse = courseDetailsById[courseId];
+      if (cachedCourse) {
+        return cachedCourse;
+      }
+
+      const course = await getCourseDetail(token, courseId);
+      setCourseDetailsById((previous) => ({
+        ...previous,
+        [courseId]: course,
+      }));
+      return course;
+    },
+    [courseDetailsById],
+  );
+
   const fetchLearningPlan = useCallback(
     async (tokenOverride?: string) => {
       const token = tokenOverride || localStorage.getItem("access_token");
@@ -332,6 +361,7 @@ export default function Dashboard() {
         const plan = await getLearningPlan(token);
         setLearningPlan(plan);
       } catch (caught) {
+        console.log("learning plan load error", caught);
         const message = caught instanceof Error ? caught.message : "";
         if (message.includes("assessment")) {
           setLearningPlanError(t("learning.assessmentRequired"));
@@ -583,13 +613,56 @@ export default function Dashboard() {
     return t(`assessment.level.${level}` as TranslationKey);
   }
 
-  async function handleLessonAction(lesson: RecommendedLesson) {
+  async function routeToCourseEntry(courseId: number) {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      handleUnauthorizedProfile();
+      return null;
+    }
+
+    try {
+      const course = await ensureCourseDetail(token, courseId);
+      const entryLessonId = resolveCourseEntryLessonId(course, progressRecords);
+      if (!entryLessonId) {
+        setLearningPlanError(t("learning.empty"));
+        return null;
+      }
+      router.push(`/lessons/${entryLessonId}`);
+      return entryLessonId;
+    } catch (caught) {
+      console.log("course entry load error", { courseId, caught });
+      setLearningPlanError(t("learning.loadError"));
+      return null;
+    }
+  }
+
+  function handleLessonAction(lesson: RecommendedLesson) {
+    void routeToCourseEntry(lesson.course_id);
+  }
+
+  function handleStartLearning(courseId?: number) {
     const token = localStorage.getItem("access_token");
     if (!token) {
       handleUnauthorizedProfile();
       return;
     }
-    router.push(`/lessons/${lesson.lesson_id}`);
+
+    const recentInProgressLessonId = resolveMostRecentInProgressLessonId(progressRecords);
+    if (!courseId && recentInProgressLessonId) {
+      router.push(`/lessons/${recentInProgressLessonId}`);
+      return;
+    }
+
+    const fallbackCourseId =
+      courseId ??
+      learningPlan?.suggested_next_lesson?.course_id ??
+      learningPlan?.recommended_lessons[0]?.course_id;
+
+    if (!fallbackCourseId) {
+      return;
+    }
+
+    void routeToCourseEntry(fallbackCourseId);
   }
 
   function handleSectionChange(section: ActiveSection) {
@@ -605,14 +678,15 @@ export default function Dashboard() {
       onStartAssessment: () => router.push("/assessment"),
       onViewAssessmentResult: () => setActiveSection("progress"),
     };
-    const learningPlanState = {
-      learningPlan,
-      isLearningPlanLoading,
-      learningPlanError,
-      updatingLessonId,
-      onRetryLearningPlan: () => fetchLearningPlan(),
-      onLessonAction: handleLessonAction,
-    };
+      const learningPlanState = {
+        learningPlan,
+        isLearningPlanLoading,
+        learningPlanError,
+        updatingLessonId,
+        onRetryLearningPlan: () => fetchLearningPlan(),
+        onLessonAction: handleLessonAction,
+        onStartLearning: handleStartLearning,
+      };
     const progressState = {
       progressRecords,
       isProgressLoading,
@@ -695,7 +769,7 @@ export default function Dashboard() {
 
   if (isCheckingAuth) {
     return (
-      <main className={theme === "dark" ? "min-h-screen bg-[#071426]" : "min-h-screen bg-[#F7FBFA]"} />
+      <main className={theme === "dark" ? "min-h-screen bg-[#071426]" : "min-h-screen bg-[var(--app-page)]"} />
     );
   }
 
@@ -771,7 +845,7 @@ export default function Dashboard() {
           className={
             theme === "dark"
               ? "mb-5 rounded-2xl border border-white/10 bg-white/8 px-4 py-3 text-sm font-bold text-teal-50/80"
-              : "mb-5 rounded-2xl border border-[#DDEAE5] bg-white px-4 py-3 text-sm font-bold text-[#60746F] shadow-sm"
+              : "mb-5 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3 text-sm font-bold text-[#667085] shadow-sm"
           }
         >
           {statusMessage}

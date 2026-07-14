@@ -50,6 +50,14 @@ class AssessmentQuestionBankTests(unittest.TestCase):
             if question["skill_tag"] == "sentence meaning":
                 self.assertNotIn(option_by_id[correct_id], question["prompt"])
 
+    def test_question_bank_includes_normalized_difficulty_metadata(self):
+        bank = build_question_bank()
+
+        ratings = {question["difficulty_rating"] for question in bank}
+        self.assertEqual(ratings, {1, 2, 3, 4, 5})
+        self.assertTrue(all(question["comfortable_language"] == question["language"] for question in bank))
+        self.assertTrue(all(question["learning_language"] == question["language"] for question in bank))
+
 
 class AssessmentScoringTests(unittest.TestCase):
     def test_copy_typing_scores_exact_answer(self):

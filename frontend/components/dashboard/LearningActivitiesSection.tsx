@@ -44,11 +44,11 @@ export function LearningActivitiesSection({
   );
   const cardClass = isDark
     ? "odyssey-card rounded-3xl border border-white/10 bg-[#0D1D2F]/82 p-5 shadow-2xl shadow-black/20"
-    : "odyssey-card rounded-3xl border border-[#DDEAE5] bg-white/92 p-5 shadow-xl shadow-slate-900/6";
+    : "odyssey-card rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
 
   return (
     <div className="min-w-0 max-w-full space-y-5">
-      <section className={isDark ? "rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#0D1D2F] to-[#083A3A] p-5" : "rounded-[2rem] border border-white/80 bg-gradient-to-br from-white to-[#E9F8F4] p-5 shadow-xl shadow-slate-900/8"}>
+      <section className={isDark ? "rounded-[2rem] border border-white/10 bg-gradient-to-br from-[#0D1D2F] to-[#083A3A] p-5" : "rounded-[2rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/8"}>
         <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>
           {t("common.appName")}
         </p>
@@ -66,7 +66,7 @@ export function LearningActivitiesSection({
                 ? "bg-gradient-to-r from-[#0F766E] to-[#14B8A6] text-white shadow-lg shadow-teal-950/10"
                 : isDark
                   ? "bg-white/8 text-teal-50/72 hover:bg-white/12"
-                  : "bg-white text-[#60746F] ring-1 ring-[#DDEAE5] hover:text-[#07192F]"
+                  : "bg-[var(--app-surface)] text-[#667085] ring-1 ring-[var(--app-border)] hover:text-[#172033]"
             }`}
           >
             {item.label}
@@ -78,25 +78,25 @@ export function LearningActivitiesSection({
         {filteredActivities.map((activity) => (
           <article key={activity.titleKey} className={`${cardClass} group flex flex-col`}>
             <div className="mb-5 flex items-start justify-between gap-4">
-              <span className={isDark ? "grid h-16 w-16 place-items-center rounded-3xl bg-white/8 transition group-hover:-translate-y-1" : "grid h-16 w-16 place-items-center rounded-3xl bg-[#E9F8F4] transition group-hover:-translate-y-1"}>
+              <span className={isDark ? "grid h-16 w-16 place-items-center rounded-3xl bg-white/8 transition group-hover:-translate-y-1" : "grid h-16 w-16 place-items-center rounded-3xl bg-[var(--app-surface-muted)] transition group-hover:-translate-y-1"}>
                 <LiteracyIcon name={categoryIcons[activity.category]} className="h-10 w-10" />
               </span>
-              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[#EEF8F4] px-3 py-1 text-xs font-black text-[#0F766E]"}>
+              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-xs font-black text-[#0F766E]"}>
                 {activity.category}
               </span>
             </div>
             <h2 className="text-xl font-black tracking-normal">{t(activity.titleKey)}</h2>
-            <p className={isDark ? "mt-3 flex-1 text-sm leading-6 text-teal-50/66" : "mt-3 flex-1 text-sm leading-6 text-[#60746F]"}>
+            <p className={isDark ? "mt-3 flex-1 text-sm leading-6 text-teal-50/66" : "mt-3 flex-1 text-sm leading-6 text-[#667085]"}>
               {t(activity.descriptionKey)}
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[#F4F1E7] px-3 py-1 text-xs font-black text-[#60746F]"}>
+              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-xs font-black text-[#667085]"}>
                 {t(activity.difficultyKey)}
               </span>
-              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[#F4F1E7] px-3 py-1 text-xs font-black text-[#60746F]"}>
+              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-xs font-black text-[#667085]"}>
                 {activity.duration}
               </span>
-              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[#F4F1E7] px-3 py-1 text-xs font-black text-[#60746F]"}>
+              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-xs font-black text-[#667085]"}>
                 {t("common.prototypeData")}
               </span>
             </div>

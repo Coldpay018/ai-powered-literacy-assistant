@@ -1,9 +1,17 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from database import Base
+from question_taxonomy import (
+    normalize_age_group,
+    normalize_difficulty_value,
+    normalize_experience_level,
+    normalize_question_language,
+    normalize_question_skill,
+    QUESTION_SKILLS,
+)
 
 
 SKILL_VALUES = ("reading", "writing", "comprehension")
@@ -91,6 +99,12 @@ class AssessmentQuestion(Base):
     section = Column(String(30), index=True, nullable=False)
     language = Column(String(10), index=True, nullable=False)
     difficulty = Column(String(30), index=True, nullable=False)
+    difficulty_rating = Column(Integer, nullable=True, index=True)
+    age_group = Column(String(20), nullable=True, index=True)
+    experience_level = Column(String(30), nullable=True, index=True)
+    comfortable_language = Column(String(10), nullable=True, index=True)
+    learning_language = Column(String(10), nullable=True, index=True)
+    skill = Column(String(30), nullable=True, index=True)
     question_type = Column(String(50), nullable=False)
     passage = Column(Text, nullable=True)
     prompt = Column(Text, nullable=False)
@@ -102,6 +116,46 @@ class AssessmentQuestion(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    @validates("difficulty_rating")
+    def _validate_difficulty_rating(self, _key, value):
+        if value is None:
+            return value
+        normalized = normalize_difficulty_value(value)
+        if normalized is None:
+            raise ValueError("difficulty_rating is required")
+        return normalized
+
+    @validates("age_group")
+    def _validate_age_group(self, _key, value):
+        if value is None:
+            return value
+        return normalize_age_group(value)
+
+    @validates("experience_level")
+    def _validate_experience_level(self, _key, value):
+        if value is None:
+            return value
+        return normalize_experience_level(value)
+
+    @validates("comfortable_language", "learning_language")
+    def _validate_question_language(self, _key, value):
+        if value is None:
+            return value
+        return normalize_question_language(value)
+
+    @validates("skill")
+    def _validate_skill(self, _key, value):
+        if value is None:
+            return value
+        return normalize_question_skill(value)
+
+    __table_args__ = (
+        CheckConstraint("(difficulty_rating IS NULL OR (difficulty_rating >= 1 AND difficulty_rating <= 5))", name="ck_assessment_questions_difficulty_rating_range"),
+        CheckConstraint("(age_group IS NULL OR age_group IN ('Child', 'Teenager', 'Adult'))", name="ck_assessment_questions_age_group"),
+        CheckConstraint("(experience_level IS NULL OR experience_level IN ('Beginner', 'Intermediate', 'Advanced'))", name="ck_assessment_questions_experience_level"),
+        Index("ix_assessment_questions_language_difficulty", "language", "difficulty_rating"),
+    )
 
 
 class AssessmentAttempt(Base):
@@ -341,6 +395,11 @@ class LessonQuestion(Base):
     question_type = Column(String(30), nullable=False, index=True)
     skill = Column(String(30), nullable=False, index=True)
     difficulty_level = Column(String(30), nullable=False, index=True)
+    difficulty_rating = Column(Integer, nullable=True, index=True)
+    age_group = Column(String(20), nullable=True, index=True)
+    experience_level = Column(String(30), nullable=True, index=True)
+    comfortable_language = Column(String(10), nullable=True, index=True)
+    learning_language = Column(String(10), nullable=True, index=True)
     minimum_age = Column(Integer, default=1, nullable=False)
     maximum_age = Column(Integer, default=120, nullable=False)
     correct_answer = Column(Text, nullable=True)
@@ -361,14 +420,44 @@ class LessonQuestion(Base):
 
     __table_args__ = (
         CheckConstraint(f"question_type in {LESSON_QUESTION_TYPE_VALUES}", name="ck_lesson_questions_type"),
-        CheckConstraint(f"skill in {SKILL_VALUES}", name="ck_lesson_questions_skill"),
+        CheckConstraint(f"skill in {QUESTION_SKILLS}", name="ck_lesson_questions_skill"),
         CheckConstraint(f"difficulty_level in {DIFFICULTY_LEVEL_VALUES}", name="ck_lesson_questions_difficulty_level"),
+        CheckConstraint("(difficulty_rating IS NULL OR (difficulty_rating >= 1 AND difficulty_rating <= 5))", name="ck_lesson_questions_difficulty_rating_range"),
+        CheckConstraint("(age_group IS NULL OR age_group IN ('Child', 'Teenager', 'Adult'))", name="ck_lesson_questions_age_group"),
+        CheckConstraint("(experience_level IS NULL OR experience_level IN ('Beginner', 'Intermediate', 'Advanced'))", name="ck_lesson_questions_experience_level"),
         CheckConstraint("minimum_age <= maximum_age", name="ck_lesson_questions_age_range"),
         CheckConstraint("sequence_order > 0", name="ck_lesson_questions_sequence_positive"),
         CheckConstraint("points >= 0", name="ck_lesson_questions_points_non_negative"),
         UniqueConstraint("lesson_id", "sequence_order", name="uq_lesson_questions_sequence"),
         Index("ix_lesson_questions_lesson_type_order", "lesson_id", "question_type", "sequence_order"),
     )
+
+    @validates("difficulty_rating")
+    def _validate_difficulty_rating(self, _key, value):
+        if value is None:
+            return value
+        normalized = normalize_difficulty_value(value)
+        if normalized is None:
+            raise ValueError("difficulty_rating is required")
+        return normalized
+
+    @validates("age_group")
+    def _validate_age_group(self, _key, value):
+        if value is None:
+            return value
+        return normalize_age_group(value)
+
+    @validates("experience_level")
+    def _validate_experience_level(self, _key, value):
+        if value is None:
+            return value
+        return normalize_experience_level(value)
+
+    @validates("comfortable_language", "learning_language")
+    def _validate_question_language(self, _key, value):
+        if value is None:
+            return value
+        return normalize_question_language(value)
 
 
 class QuestionOption(Base):
@@ -400,6 +489,7 @@ class LessonAttempt(Base):
     correct_answers = Column(Integer, default=0, nullable=False)
     total_questions = Column(Integer, default=0, nullable=False)
     time_spent_seconds = Column(Integer, default=0, nullable=False)
+    submission_hash = Column(String(128), nullable=True)
     started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -415,6 +505,7 @@ class LessonAttempt(Base):
         CheckConstraint("time_spent_seconds >= 0", name="ck_lesson_attempts_time_non_negative"),
         UniqueConstraint("user_id", "lesson_id", "attempt_number", name="uq_lesson_attempt_user_lesson_number"),
         Index("ix_lesson_attempts_user_lesson_started", "user_id", "lesson_id", "started_at"),
+        Index("ix_lesson_attempts_submission_hash", "user_id", "lesson_id", "submission_hash"),
     )
 
 
@@ -464,6 +555,33 @@ class LearnerProgress(Base):
         CheckConstraint("time_spent >= 0", name="ck_learner_progress_time_spent_non_negative"),
         Index("ix_learner_progress_user_status", "user_id", "status"),
         Index("ix_learner_progress_user_completion_status", "user_id", "completion_status"),
+    )
+
+
+class LearnerSkillDifficulty(Base):
+    __tablename__ = "learner_skill_difficulties"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    skill = Column(String(30), nullable=False, index=True)
+    current_difficulty = Column(Integer, default=1, nullable=False)
+    correct_streak = Column(Integer, default=0, nullable=False)
+    incorrect_streak = Column(Integer, default=0, nullable=False)
+    recent_response_history_json = Column(Text, nullable=False, default="[]")
+    rolling_accuracy = Column(Float, default=0, nullable=False)
+    last_adjustment_reason = Column(String(100), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "skill", name="uq_learner_skill_difficulty_user_skill"),
+        CheckConstraint(f"skill in {QUESTION_SKILLS}", name="ck_learner_skill_difficulty_skill"),
+        CheckConstraint("current_difficulty >= 1 and current_difficulty <= 5", name="ck_learner_skill_difficulty_current_range"),
+        CheckConstraint("correct_streak >= 0", name="ck_learner_skill_difficulty_correct_streak_non_negative"),
+        CheckConstraint("incorrect_streak >= 0", name="ck_learner_skill_difficulty_incorrect_streak_non_negative"),
+        CheckConstraint("rolling_accuracy >= 0 and rolling_accuracy <= 1", name="ck_learner_skill_difficulty_accuracy_range"),
     )
 
 

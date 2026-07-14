@@ -13,6 +13,7 @@ import {
 import { getAssessmentStatus } from "@/lib/assessment/api";
 import { API_BASE_URL } from "@/lib/api/config";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import { applyDocumentTheme } from "@/lib/theme";
 
 const educationOptions = [
   { value: "No formal education", labelKey: "option.education.none" },
@@ -130,6 +131,10 @@ export default function Home() {
       setMounted(true);
     });
   }, [resetLanguage]);
+
+  useEffect(() => {
+    applyDocumentTheme(theme);
+  }, [theme]);
 
   const isDark = theme === "dark";
 

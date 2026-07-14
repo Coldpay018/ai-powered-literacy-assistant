@@ -1,8 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f8f6;
-  --foreground: #0b1830;
+  --background: #f6f7f4;
+  --foreground: #172033;
+  --app-page: #f6f7f4;
+  --app-sidebar: #eef3f1;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f1f5f3;
+  --app-surface-soft: #e8efec;
+  --app-text: #172033;
+  --app-text-muted: #667085;
+  --app-border: #dde4e1;
+  --app-accent: #0f766e;
+  --app-accent-strong: #14b8a6;
+  --app-accent-soft: #d9f6ef;
+  --app-shadow: 0 22px 60px rgba(7, 25, 47, 0.12);
   --odyssey-navy: #07192f;
   --odyssey-navy-2: #09243b;
   --odyssey-teal: #0f766e;
@@ -22,15 +34,44 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #050b14;
+    --foreground: #f4f7f6;
   }
+}
+
+html[data-theme="light"] {
+  --background: #f6f7f4;
+  --foreground: #172033;
+  --app-page: #f6f7f4;
+  --app-sidebar: #eef3f1;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f1f5f3;
+  --app-surface-soft: #e8efec;
+  --app-text: #172033;
+  --app-text-muted: #667085;
+  --app-border: #dde4e1;
+  --app-shadow: 0 22px 60px rgba(7, 25, 47, 0.12);
+}
+
+html[data-theme="dark"] {
+  --background: #050b14;
+  --foreground: #f4f7f6;
+  --app-page: #071426;
+  --app-sidebar: #0b1c2a;
+  --app-surface: #0d1d2f;
+  --app-surface-muted: #132235;
+  --app-surface-soft: #1a2b3d;
+  --app-text: #f4f7f6;
+  --app-text-muted: #b8c7c5;
+  --app-border: rgba(255, 255, 255, 0.1);
+  --app-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
 }
 
 button,
@@ -51,6 +92,45 @@ a:focus-visible {
 
 .page-enter {
   animation: page-enter 520ms ease both;
+}
+
+.app-page {
+  background: var(--app-page);
+  color: var(--app-text);
+}
+
+.app-sidebar {
+  background: var(--app-sidebar);
+  color: var(--app-text);
+}
+
+.app-surface {
+  background: var(--app-surface);
+}
+
+.app-surface-muted {
+  background: var(--app-surface-muted);
+}
+
+.app-surface-soft {
+  background: var(--app-surface-soft);
+}
+
+.app-border {
+  border-color: var(--app-border);
+}
+
+.app-text-muted {
+  color: var(--app-text-muted);
+}
+
+.app-accent {
+  background: var(--app-accent);
+  color: #ffffff;
+}
+
+.app-accent-soft {
+  background: var(--app-surface-soft);
 }
 
 .odyssey-card {

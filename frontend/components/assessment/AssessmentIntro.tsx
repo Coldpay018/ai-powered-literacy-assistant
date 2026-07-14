@@ -17,7 +17,7 @@ export function AssessmentIntro({
 }: AssessmentIntroProps) {
   const cardClass = isDark
     ? "border-[#2B373B] bg-[#151D20] text-[#F4F7F6]"
-    : "border-[#DDE3E0] bg-white text-[#172033]";
+    : "border-[var(--app-border)] bg-[var(--app-surface)] text-[#172033]";
   const mutedTextClass = isDark ? "text-[#A8B3B0]" : "text-[#667085]";
   const buttonClass = isDark
     ? "rounded-xl bg-[#63B3A7] px-5 py-3 text-sm font-semibold text-[#0F1517] transition hover:bg-[#79C7BC] disabled:opacity-60"
@@ -41,7 +41,7 @@ export function AssessmentIntro({
             className={
               isDark
                 ? "rounded-xl border border-[#2B373B] bg-[#202B2F] p-4"
-                : "rounded-xl border border-[#DDE3E0] bg-[#F5F7F6] p-4"
+                : "rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-muted)] p-4"
             }
           >
             <p className="text-sm font-semibold">

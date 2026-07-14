@@ -9,6 +9,7 @@ import { API_BASE_URL } from "@/lib/api/config";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { getLessonPlayer, submitLessonQuiz, updateLessonProgress } from "@/lib/learning/api";
 import type { LessonContentBlock, LessonPlayer, LessonQuizSubmitResponse } from "@/lib/learning/types";
+import { applyDocumentTheme } from "@/lib/theme";
 
 type Theme = "light" | "dark";
 
@@ -57,7 +58,7 @@ function BlockContent({
 
   if (block.content_type === "image" && block.content_url) {
     return (
-      <div className={isDark ? "rounded-3xl bg-white/6 p-4" : "rounded-3xl bg-[#EEF8F4] p-4"}>
+      <div className={isDark ? "rounded-3xl bg-white/6 p-4" : "rounded-3xl bg-[var(--app-surface-muted)] p-4"}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={block.content_url} alt={block.title} className="mx-auto max-h-[360px] w-full object-contain" />
       </div>
@@ -72,7 +73,7 @@ function BlockContent({
     return (
       <ol className="mt-4 space-y-3">
         {items.map((item, index) => (
-          <li key={item} className={isDark ? "rounded-2xl bg-white/8 p-4 text-sm font-bold" : "rounded-2xl bg-[#EEF8F4] p-4 text-sm font-bold text-[#07192F]"}>
+          <li key={item} className={isDark ? "rounded-2xl bg-white/8 p-4 text-sm font-bold" : "rounded-2xl bg-[var(--app-surface-muted)] p-4 text-sm font-bold text-[#172033]"}>
             {index + 1}. {item}
           </li>
         ))}
@@ -84,9 +85,9 @@ function BlockContent({
     return (
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {pairs.map((pair) => (
-          <div key={`${pair.left}-${pair.right}`} className={isDark ? "rounded-2xl bg-white/8 p-4" : "rounded-2xl bg-[#EEF8F4] p-4"}>
+          <div key={`${pair.left}-${pair.right}`} className={isDark ? "rounded-2xl bg-white/8 p-4" : "rounded-2xl bg-[var(--app-surface-muted)] p-4"}>
             <p className="text-sm font-black">{pair.left}</p>
-            <p className={isDark ? "mt-2 text-sm text-teal-50/66" : "mt-2 text-sm text-[#60746F]"}>{pair.right}</p>
+            <p className={isDark ? "mt-2 text-sm text-teal-50/66" : "mt-2 text-sm text-[#667085]"}>{pair.right}</p>
           </div>
         ))}
       </div>
@@ -118,6 +119,10 @@ export default function LessonPlayerPage() {
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
 
   const isDark = theme === "dark";
+
+  useEffect(() => {
+    applyDocumentTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -186,8 +191,8 @@ export default function LessonPlayerPage() {
   const progressValue = quizResult?.progress.progress_percentage ?? lesson?.progress?.progress_percentage ?? 0;
   const cardClass = isDark
     ? "rounded-3xl border border-white/10 bg-[#0D1D2F]/86 p-5 shadow-2xl shadow-black/20"
-    : "rounded-3xl border border-[#DDEAE5] bg-white/94 p-5 shadow-xl shadow-slate-900/6";
-  const mutedText = isDark ? "text-teal-50/66" : "text-[#60746F]";
+    : "rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
+  const mutedText = isDark ? "text-teal-50/66" : "text-[#667085]";
   const blockTabs = useMemo(() => lesson?.content_blocks || [], [lesson]);
   const progressRecord = quizResult?.progress ?? lesson?.progress ?? null;
 
@@ -261,19 +266,19 @@ export default function LessonPlayerPage() {
   }
 
   if (!mounted) {
-    return <main className="min-h-screen bg-[#F5F7F6]" />;
+    return <main className="min-h-screen bg-[var(--app-page)]" />;
   }
 
   return (
-    <main className={isDark ? "min-h-screen bg-[radial-gradient(circle_at_top_right,#123D3C_0,#071426_38%,#050B14_100%)] text-[#F7FBFA]" : "min-h-screen bg-[linear-gradient(135deg,#F7FBFA_0%,#F4F1E7_100%)] text-[#07192F]"}>
-      <header className={isDark ? "sticky top-0 z-20 border-b border-white/10 bg-[#071426]/90 px-4 py-4 backdrop-blur md:px-7" : "sticky top-0 z-20 border-b border-[#DDEAE5] bg-white/84 px-4 py-4 backdrop-blur md:px-7"}>
+    <main className={isDark ? "min-h-screen bg-[radial-gradient(circle_at_top_right,#123D3C_0,#071426_38%,#050B14_100%)] text-[#F7FBFA]" : "min-h-screen bg-[var(--app-page)] text-[#172033]"}>
+      <header className={isDark ? "sticky top-0 z-20 border-b border-white/10 bg-[#071426]/90 px-4 py-4 backdrop-blur md:px-7" : "sticky top-0 z-20 border-b border-[var(--app-border)] bg-[var(--app-page)] px-4 py-4 backdrop-blur md:px-7"}>
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
           <BrandMark light={isDark} compact />
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => router.push("/dashboard")} className={isDark ? "rounded-full border border-white/10 px-4 py-2 text-sm font-bold text-white" : "rounded-full border border-[#DDEAE5] bg-white px-4 py-2 text-sm font-bold text-[#07192F]"}>
+            <button type="button" onClick={() => router.push("/dashboard")} className={isDark ? "rounded-full border border-white/10 px-4 py-2 text-sm font-bold text-white" : "rounded-full border border-[var(--app-border)] bg-white px-4 py-2 text-sm font-bold text-[#172033]"}>
               {t("assessment.goToDashboard")}
             </button>
-            <button type="button" onClick={toggleTheme} className={isDark ? "rounded-full border border-white/10 px-4 py-2 text-sm font-bold text-white" : "rounded-full border border-[#DDEAE5] bg-white px-4 py-2 text-sm font-bold text-[#07192F]"}>
+            <button type="button" onClick={toggleTheme} className={isDark ? "rounded-full border border-white/10 px-4 py-2 text-sm font-bold text-white" : "rounded-full border border-[var(--app-border)] bg-white px-4 py-2 text-sm font-bold text-[#172033]"}>
               {theme === "dark" ? t("common.light") : t("common.dark")}
             </button>
           </div>
@@ -286,26 +291,26 @@ export default function LessonPlayerPage() {
           <h1 className="mt-2 break-words text-2xl font-black tracking-normal">{lesson?.title || t("common.loading")}</h1>
           <p className={`mt-3 text-sm leading-6 ${mutedText}`}>{lesson?.description}</p>
           <div className="mt-5">
-            <div className={isDark ? "h-3 overflow-hidden rounded-full bg-white/10" : "h-3 overflow-hidden rounded-full bg-[#DDEAE5]"}>
+            <div className={isDark ? "h-3 overflow-hidden rounded-full bg-white/10" : "h-3 overflow-hidden rounded-full bg-[var(--app-surface-muted)]"}>
               <div className="h-full rounded-full bg-gradient-to-r from-[#0F766E] to-[#14B8A6]" style={{ width: `${progressValue}%` }} />
             </div>
             <p className={`mt-2 text-xs font-black ${mutedText}`}>{Math.round(progressValue)}%</p>
           </div>
           {progressRecord ? (
             <div className="mt-5 grid grid-cols-2 gap-3 text-xs font-bold">
-              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[#EEF8F4] p-3"}>
+              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.questionsAttempted")}</p>
                 <p className="mt-1 text-sm font-black">{progressRecord.questions_attempted}</p>
               </div>
-              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[#EEF8F4] p-3"}>
+              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.timeSpent")}</p>
                 <p className="mt-1 text-sm font-black">{progressRecord.time_spent_seconds}s</p>
               </div>
-              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[#EEF8F4] p-3"}>
+              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.score")}</p>
                 <p className="mt-1 text-sm font-black">{Math.round(progressRecord.score)}%</p>
               </div>
-              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[#EEF8F4] p-3"}>
+              <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.currentDifficulty")}</p>
                 <p className="mt-1 text-sm font-black">{progressRecord.current_difficulty || t("common.notAvailable")}</p>
               </div>
@@ -322,7 +327,7 @@ export default function LessonPlayerPage() {
                     ? "bg-gradient-to-r from-[#0F766E] to-[#14B8A6] text-white"
                     : isDark
                       ? "bg-white/8 text-teal-50/72 hover:bg-white/12"
-                      : "bg-[#EEF8F4] text-[#60746F] hover:text-[#07192F]"
+                      : "bg-[var(--app-surface-muted)] text-[#667085] hover:text-[#172033]"
                 }`}
               >
                 {block.title}
@@ -341,7 +346,7 @@ export default function LessonPlayerPage() {
                 {t("assessment.goToDashboard")}
               </button>
             </div>
-          ) : lesson?.locked ? (
+          ) : lesson && !lesson.is_unlocked ? (
             <div className={cardClass}>
               <div className="flex items-center gap-3">
                 <LiteracyIcon name="lightbulb" className="h-8 w-8" />
@@ -366,7 +371,7 @@ export default function LessonPlayerPage() {
                     </p>
                     <h2 className="mt-2 break-words text-3xl font-black tracking-normal">{currentBlock.title}</h2>
                   </div>
-                  <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[#EEF8F4] px-3 py-1 text-xs font-black text-[#0F766E]"}>
+                  <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-xs font-black text-[#0F766E]"}>
                     {currentIndex + 1}/{lesson.content_blocks.length}
                   </span>
                 </div>
@@ -384,7 +389,7 @@ export default function LessonPlayerPage() {
                   {quizQuestions.map((question) => {
                     const result = quizResult?.results.find((item) => item.question_id === question.id);
                     return (
-                      <div key={question.id} className={isDark ? "rounded-2xl bg-white/6 p-4" : "rounded-2xl bg-[#EEF8F4] p-4"}>
+                      <div key={question.id} className={isDark ? "rounded-2xl bg-white/6 p-4" : "rounded-2xl bg-[var(--app-surface-muted)] p-4"}>
                         <p className="text-sm font-black">{question.sequence_order}. {question.question_text}</p>
                         {question.options.length ? (
                           <div className="mt-3 grid gap-2">
@@ -406,7 +411,7 @@ export default function LessonPlayerPage() {
                             type="text"
                             value={answers[question.id] || ""}
                             onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
-                            className={isDark ? "mt-3 h-12 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm text-white outline-none" : "mt-3 h-12 w-full rounded-2xl border border-[#DDEAE5] bg-white px-4 text-sm text-[#07192F] outline-none"}
+                            className={isDark ? "mt-3 h-12 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm text-white outline-none" : "mt-3 h-12 w-full rounded-2xl border border-[var(--app-border)] bg-white px-4 text-sm text-[#172033] outline-none"}
                             placeholder={t("assessment.enterYourAnswer")}
                           />
                         )}
@@ -426,12 +431,12 @@ export default function LessonPlayerPage() {
               </article>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <button type="button" onClick={() => void goToBlock(currentIndex - 1)} disabled={currentIndex === 0 || isSaving} className={isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white disabled:opacity-50" : "rounded-2xl border border-[#DDEAE5] bg-white px-5 py-3 text-sm font-black text-[#07192F] disabled:opacity-50"}>
+                <button type="button" onClick={() => void goToBlock(currentIndex - 1)} disabled={currentIndex === 0 || isSaving} className={isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white disabled:opacity-50" : "rounded-2xl border border-[var(--app-border)] bg-white px-5 py-3 text-sm font-black text-[#172033] disabled:opacity-50"}>
                   {t("assessment.previous")}
                 </button>
                 <div className="flex flex-col gap-3 sm:flex-row">
                   {lesson.previous_lesson ? (
-                    <button type="button" onClick={() => router.push(`/lessons/${lesson.previous_lesson?.id}`)} className={isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white" : "rounded-2xl border border-[#DDEAE5] bg-white px-5 py-3 text-sm font-black text-[#07192F]"}>
+                    <button type="button" onClick={() => router.push(`/lessons/${lesson.previous_lesson?.id}`)} className={isDark ? "rounded-2xl border border-white/10 px-5 py-3 text-sm font-black text-white" : "rounded-2xl border border-[var(--app-border)] bg-white px-5 py-3 text-sm font-black text-[#172033]"}>
                       {t("lesson.previousLesson")}
                     </button>
                   ) : null}
@@ -440,8 +445,8 @@ export default function LessonPlayerPage() {
                       {isSaving ? t("profile.saving") : t("assessment.next")}
                     </button>
                   ) : lesson.next_lesson ? (
-                    <button type="button" onClick={() => router.push(`/lessons/${lesson.next_lesson?.id}`)} disabled={lesson.next_lesson.locked} className="rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
-                      {lesson.next_lesson.locked ? t("lesson.nextLocked") : t("lesson.nextLesson")}
+                    <button type="button" onClick={() => router.push(`/lessons/${lesson.next_lesson?.id}`)} disabled={!lesson.next_lesson.is_unlocked} className="rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+                      {lesson.next_lesson.is_unlocked ? t("lesson.nextLesson") : t("lesson.nextLocked")}
                     </button>
                   ) : null}
                 </div>

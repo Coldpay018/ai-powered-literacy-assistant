@@ -5,6 +5,7 @@ import { AssessmentStatusCard } from "@/components/assessment/AssessmentStatusCa
 import { LiteracyIcon } from "@/components/ui/LiteracyIllustrations";
 import { ProgressRing } from "@/components/ui/ProgressRing";
 import { SkillBar } from "@/components/ui/SkillBar";
+import type { RecommendedLesson } from "@/lib/learning/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import type {
   AssessmentState,
@@ -53,6 +54,16 @@ const achievements: Array<{
   },
 ];
 
+function compareLessonOrder(left: RecommendedLesson, right: RecommendedLesson) {
+  return (
+    left.course_order - right.course_order ||
+    left.course_title.localeCompare(right.course_title) ||
+    left.module_order - right.module_order ||
+    left.lesson_order - right.lesson_order ||
+    left.title.localeCompare(right.title)
+  );
+}
+
 function MiniTrend({ value, isDark }: { value: number; isDark: boolean }) {
   const points = "0,92 50,76 100,61 150,48 200,48 250,36 300,28 350,22";
   return (
@@ -91,7 +102,7 @@ export function ProgressSection({
   isLearningPlanLoading,
   learningPlanError,
   onRetryLearningPlan,
-  onLessonAction,
+  onStartLearning,
   updatingLessonId,
   progressState,
   isDark,
@@ -101,8 +112,12 @@ export function ProgressSection({
   const score = assessmentResult?.overall_score ?? 72;
   const cardClass = isDark
     ? "rounded-3xl border border-white/10 bg-[#0D1D2F]/82 p-5 shadow-2xl shadow-black/20"
-    : "rounded-3xl border border-[#DDEAE5] bg-white/92 p-5 shadow-xl shadow-slate-900/6";
-  const nextLesson = learningPlan?.suggested_next_lesson;
+    : "rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
+  const orderedLessons = [...(learningPlan?.recommended_lessons || [])].sort(compareLessonOrder);
+  const nextLesson =
+    orderedLessons.find((lesson) => lesson.current_progress_status !== "completed") ||
+    learningPlan?.suggested_next_lesson ||
+    orderedLessons[0];
 
   return (
     <div className="min-w-0 max-w-full space-y-5">
@@ -117,7 +132,7 @@ export function ProgressSection({
                 ? "bg-gradient-to-r from-[#0F766E] to-[#14B8A6] text-white shadow-lg shadow-teal-950/10"
                 : isDark
                   ? "bg-white/8 text-teal-50/72 hover:bg-white/12"
-                  : "bg-white text-[#60746F] ring-1 ring-[#DDEAE5] hover:text-[#07192F]"
+                  : "bg-[var(--app-surface)] text-[#667085] ring-1 ring-[var(--app-border)] hover:text-[#172033]"
             }`}
           >
             {t(tab.labelKey)}
@@ -164,7 +179,7 @@ export function ProgressSection({
             <div className={cardClass}>
               <h2 className="text-lg font-black tracking-normal">{t("dashboard.recommendedNextStep")}</h2>
               {isLearningPlanLoading ? (
-                <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("learning.loading")}</p>
+                <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("learning.loading")}</p>
               ) : learningPlanError ? (
                 <>
                   <p className="mt-3 text-sm font-bold text-red-500">{learningPlanError}</p>
@@ -174,23 +189,28 @@ export function ProgressSection({
                 </>
               ) : nextLesson ? (
                 <>
-                  <span className={isDark ? "mt-5 grid h-16 w-16 place-items-center rounded-3xl bg-white/8" : "mt-5 grid h-16 w-16 place-items-center rounded-3xl bg-[#E9F8F4]"}>
+                  <span className={isDark ? "mt-5 grid h-16 w-16 place-items-center rounded-3xl bg-white/8" : "mt-5 grid h-16 w-16 place-items-center rounded-3xl bg-[var(--app-surface-muted)]"}>
                     <LiteracyIcon name="path" className="h-10 w-10" />
                   </span>
                   <h3 className="mt-4 text-xl font-black tracking-normal">{nextLesson.title}</h3>
-                  <p className={isDark ? "mt-3 text-sm leading-6 text-teal-50/66" : "mt-3 text-sm leading-6 text-[#60746F]"}>{nextLesson.description}</p>
+                  <p className={isDark ? "mt-3 text-sm leading-6 text-teal-50/66" : "mt-3 text-sm leading-6 text-[#667085]"}>{nextLesson.description}</p>
+                  <p className={isDark ? "mt-2 text-xs leading-5 text-teal-50/55" : "mt-2 text-xs leading-5 text-[#667085]"}>{nextLesson.recommendation_reason}</p>
                   <button
                     type="button"
-                    onClick={() => onLessonAction(nextLesson)}
-                    disabled={updatingLessonId === nextLesson.lesson_id || nextLesson.current_progress_status === "completed"}
+                    onClick={() => onStartLearning(nextLesson.course_id)}
+                    disabled={updatingLessonId === nextLesson.lesson_id}
                     className="group mt-5 w-full rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {nextLesson.current_progress_status === "not_started" ? t("learning.startLesson") : t("learning.markComplete")}{" "}
+                    {nextLesson.current_progress_status === "not_started"
+                      ? t("learning.startLesson")
+                      : nextLesson.current_progress_status === "in_progress"
+                        ? t("learning.markComplete")
+                        : t("learning.completed")}{" "}
                     <span className="odyssey-button-arrow inline-block">-&gt;</span>
                   </button>
                 </>
               ) : (
-                <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("learning.empty")}</p>
+                <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("learning.empty")}</p>
               )}
             </div>
           </section>
@@ -198,7 +218,7 @@ export function ProgressSection({
           <section className={cardClass}>
             <h2 className="text-lg font-black tracking-normal">{t("common.progress")}</h2>
             {progressState.isProgressLoading ? (
-              <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("common.loading")}</p>
+              <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("common.loading")}</p>
             ) : progressState.progressError ? (
               <>
                 <p className="mt-3 text-sm font-bold text-red-500">{progressState.progressError}</p>
@@ -209,12 +229,12 @@ export function ProgressSection({
             ) : progressState.progressRecords.length ? (
               <div className="mt-5 space-y-3">
                 {progressState.progressRecords.slice(0, 5).map((record) => (
-                  <article key={record.lesson_id} className={isDark ? "rounded-2xl bg-white/8 p-4" : "rounded-2xl bg-[#EEF8F4] p-4"}>
+                  <article key={record.lesson_id} className={isDark ? "rounded-2xl bg-white/8 p-4" : "rounded-2xl bg-[var(--app-surface-muted)] p-4"}>
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <h3 className="text-sm font-black">{record.lesson_title || `Lesson ${record.lesson_id}`}</h3>
-                      <span className={isDark ? "text-xs font-black text-teal-50/66" : "text-xs font-black text-[#60746F]"}>{record.completion_status}</span>
+                      <span className={isDark ? "text-xs font-black text-teal-50/66" : "text-xs font-black text-[#667085]"}>{record.completion_status}</span>
                     </div>
-                    <div className={`mt-3 grid grid-cols-2 gap-3 text-xs font-bold ${isDark ? "text-teal-50/72" : "text-[#60746F]"}`}>
+                    <div className={`mt-3 grid grid-cols-2 gap-3 text-xs font-bold ${isDark ? "text-teal-50/72" : "text-[#667085]"}`}>
                       <p>{t("lesson.questionsAttempted")}: {record.questions_attempted}</p>
                       <p>{t("lesson.score")}: {Math.round(record.score)}%</p>
                       <p>{t("lesson.timeSpent")}: {record.time_spent_seconds}s</p>
@@ -224,7 +244,7 @@ export function ProgressSection({
                 ))}
               </div>
             ) : (
-              <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#60746F]"}>{t("common.notAvailable")}</p>
+              <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("common.notAvailable")}</p>
             )}
           </section>
         </>
@@ -244,11 +264,11 @@ export function ProgressSection({
       {activeTab === "activity" ? (
         <section className={cardClass}>
           <h2 className="text-lg font-black tracking-normal">{t("dashboard.recentActivity")}</h2>
-          <div className={isDark ? "mt-4 divide-y divide-white/10" : "mt-4 divide-y divide-[#DDEAE5]"}>
+          <div className={isDark ? "mt-4 divide-y divide-white/10" : "mt-4 divide-y divide-[var(--app-border)]"}>
             {prototypeData.recentActivities.map((activity, index) => (
               <div key={activity} className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm font-bold">{t(activity)}</p>
-                <p className={isDark ? "text-sm text-teal-50/62" : "text-sm text-[#60746F]"}>
+                <p className={isDark ? "text-sm text-teal-50/62" : "text-sm text-[#667085]"}>
                   {t("dashboard.sessionCompleted", { number: index + 1 })}
                 </p>
               </div>
@@ -263,7 +283,7 @@ export function ProgressSection({
             <article key={achievement.titleKey} className={cardClass}>
               <LiteracyIcon name={achievement.icon} className="h-12 w-12" />
               <h3 className="mt-4 text-lg font-black tracking-normal">{t(achievement.titleKey)}</h3>
-              <p className={isDark ? "mt-2 text-sm text-teal-50/66" : "mt-2 text-sm text-[#60746F]"}>{t(achievement.detailKey)}</p>
+              <p className={isDark ? "mt-2 text-sm text-teal-50/66" : "mt-2 text-sm text-[#667085]"}>{t(achievement.detailKey)}</p>
             </article>
           ))}
         </section>

@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from assessment_service import (
     current_attempt,
@@ -33,6 +35,9 @@ from learning_content_service import (
 )
 import models
 from recommendation_service import current_recommendations, generate_recommendations, learning_plan
+from personalization_service import build_personalization_profile
+from adaptive_difficulty_service import evaluate_difficulty
+from question_difficulty_service import build_starting_difficulty_profile
 from schema_updates import apply_sqlite_schema_updates
 from schemas import (
     AssessmentAnswersRequest,
@@ -53,7 +58,9 @@ from schemas import (
     ModuleDetailResponse,
     ModuleSummaryResponse,
     PersonalizedLearningPlanResponse,
+    PersonalizationProfileResponse,
     RecommendedLessonResponse,
+    StartingDifficultyResponse,
     TokenResponse,
     UserCreate,
     UserResponse,
@@ -335,7 +342,16 @@ def list_lessons(
         query = query.filter(models.Lesson.proficiency_level == proficiency_level)
     if language:
         query = query.filter(models.Lesson.language == language)
-    return query.order_by(models.Lesson.proficiency_level, models.Lesson.difficulty_order).all()
+    lessons = query.options(joinedload(models.Lesson.module)).all()
+    return sorted(
+        lessons,
+        key=lambda lesson: (
+            lesson.module.sequence_order if lesson.module and lesson.module.sequence_order is not None else 10**9,
+            lesson.module.title if lesson.module else "",
+            lesson.sequence_order if lesson.sequence_order is not None else 0,
+            lesson.title or "",
+        ),
+    )
 
 
 @app.get("/lessons/{lesson_id}", response_model=LessonDetailResponse)
@@ -384,17 +400,39 @@ def _get_or_create_lesson_progress(
     return progress
 
 
-def _module_lessons(db: Session, lesson: models.Lesson) -> list[models.Lesson]:
-    query = db.query(models.Lesson).filter(
-        models.Lesson.course_id == lesson.course_id,
-        models.Lesson.is_active == True,
-        models.Lesson.is_published == True,
+def _course_lessons(course: models.Course) -> list[models.Lesson]:
+    ordered_lessons: list[models.Lesson] = []
+
+    modules = sorted(
+        [module for module in course.modules if module.is_published],
+        key=lambda module: (
+            module.sequence_order if module.sequence_order is not None else 0,
+            module.title or "",
+        ),
     )
-    if lesson.module_id is None:
-        query = query.filter(models.Lesson.module_id.is_(None))
-    else:
-        query = query.filter(models.Lesson.module_id == lesson.module_id)
-    return query.order_by(models.Lesson.sequence_order, models.Lesson.id).all()
+    for module in modules:
+        module_lessons = sorted(
+            [lesson for lesson in module.lessons if lesson.is_active and lesson.is_published],
+            key=lambda lesson: (
+                lesson.sequence_order if lesson.sequence_order is not None else 0,
+                lesson.title or "",
+            ),
+        )
+        ordered_lessons.extend(module_lessons)
+
+    standalone_lessons = sorted(
+        [
+            lesson
+            for lesson in course.lessons
+            if lesson.is_active and lesson.is_published and lesson.module_id is None
+        ],
+        key=lambda lesson: (
+            lesson.sequence_order if lesson.sequence_order is not None else 0,
+            lesson.title or "",
+        ),
+    )
+    ordered_lessons.extend(standalone_lessons)
+    return ordered_lessons
 
 
 def _progress_status_map(
@@ -423,32 +461,37 @@ def _sync_progress_metadata(progress: models.LearnerProgress, lesson: models.Les
     progress.completion_status = progress.status
 
 
-def _is_lesson_locked(
+def _is_lesson_unlocked(
     lesson: models.Lesson,
     lessons: list[models.Lesson],
     progress_by_lesson: dict[int, models.LearnerProgress],
 ) -> bool:
     index = next((position for position, item in enumerate(lessons) if item.id == lesson.id), 0)
     if index <= 0:
-        return False
+        return True
+    current_progress = progress_by_lesson.get(lesson.id)
+    if current_progress and current_progress.status in {"in_progress", "completed"}:
+        return True
     previous_lesson = lessons[index - 1]
     previous_progress = progress_by_lesson.get(previous_lesson.id)
-    return previous_progress is None or previous_progress.status != "completed"
+    return previous_progress is not None and previous_progress.status == "completed"
 
 
 def _navigation_item(
     lesson: models.Lesson | None,
-    locked: bool,
+    lessons: list[models.Lesson],
     progress_by_lesson: dict[int, models.LearnerProgress],
 ) -> dict | None:
     if lesson is None:
         return None
     progress = progress_by_lesson.get(lesson.id)
+    is_unlocked = _is_lesson_unlocked(lesson, lessons, progress_by_lesson)
     return {
         "id": lesson.id,
         "title": lesson.title,
         "status": progress.status if progress else "not_started",
-        "locked": locked,
+        "is_unlocked": is_unlocked,
+        "locked": not is_unlocked,
     }
 
 
@@ -459,15 +502,15 @@ def read_lesson_player(
     db: Session = Depends(get_db),
 ):
     lesson = get_published_lesson(db, lesson_id)
-    lessons = _module_lessons(db, lesson)
+    lessons = _course_lessons(lesson.course)
     progress_by_lesson = _progress_status_map(db, current_user.id, lessons)
-    locked = _is_lesson_locked(lesson, lessons, progress_by_lesson)
+    is_unlocked = _is_lesson_unlocked(lesson, lessons, progress_by_lesson)
     index = next((position for position, item in enumerate(lessons) if item.id == lesson.id), 0)
     previous_lesson = lessons[index - 1] if index > 0 else None
     next_lesson = lessons[index + 1] if index + 1 < len(lessons) else None
 
     progress = progress_by_lesson.get(lesson.id)
-    if not locked:
+    if is_unlocked:
         progress = _get_or_create_lesson_progress(db, current_user.id, lesson.id)
         _sync_progress_metadata(progress, lesson)
         now = datetime.now(timezone.utc)
@@ -488,20 +531,19 @@ def read_lesson_player(
         db.refresh(progress)
         progress_by_lesson[lesson.id] = progress
 
-    previous_locked = _is_lesson_locked(previous_lesson, lessons, progress_by_lesson) if previous_lesson else False
-    next_locked = _is_lesson_locked(next_lesson, lessons, progress_by_lesson) if next_lesson else False
     detail = serialize_lesson_detail(lesson)
-    if locked:
+    if not is_unlocked:
         detail["content_blocks"] = []
         detail["questions"] = []
 
     return {
         **detail,
         "progress": progress,
-        "locked": locked,
-        "lock_reason": "Complete the previous lesson to unlock this lesson." if locked else None,
-        "previous_lesson": _navigation_item(previous_lesson, previous_locked, progress_by_lesson),
-        "next_lesson": _navigation_item(next_lesson, next_locked, progress_by_lesson),
+        "is_unlocked": is_unlocked,
+        "locked": not is_unlocked,
+        "lock_reason": "Complete the previous lesson to unlock this lesson." if not is_unlocked else None,
+        "previous_lesson": _navigation_item(previous_lesson, lessons, progress_by_lesson),
+        "next_lesson": _navigation_item(next_lesson, lessons, progress_by_lesson),
     }
 
 
@@ -557,6 +599,22 @@ def update_lesson_progress(
         )
         if not valid_block:
             raise HTTPException(status_code=422, detail="Invalid content block for lesson")
+
+    course = (
+        db.query(models.Course)
+        .options(
+            joinedload(models.Course.modules).joinedload(models.CourseModule.lessons),
+            joinedload(models.Course.lessons),
+        )
+        .filter(models.Course.id == lesson.course_id)
+        .first()
+    )
+    if course is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+    lessons = _course_lessons(course)
+    progress_by_lesson = _progress_status_map(db, current_user.id, lessons)
+    if not _is_lesson_unlocked(lesson, lessons, progress_by_lesson):
+        raise HTTPException(status_code=423, detail="Lesson is locked")
 
     progress = _get_or_create_lesson_progress(db, current_user.id, lesson_id)
     _sync_progress_metadata(progress, lesson)
@@ -614,19 +672,38 @@ def submit_lesson_quiz(
     db: Session = Depends(get_db),
 ):
     lesson = get_published_lesson(db, lesson_id)
-    lessons = _module_lessons(db, lesson)
+    lessons = _course_lessons(lesson.course)
     progress_by_lesson = _progress_status_map(db, current_user.id, lessons)
-    if _is_lesson_locked(lesson, lessons, progress_by_lesson):
+    if not _is_lesson_unlocked(lesson, lessons, progress_by_lesson):
         raise HTTPException(status_code=423, detail="Lesson is locked")
 
     questions = sorted(lesson.questions, key=lambda item: item.sequence_order)
     if not questions:
         raise HTTPException(status_code=422, detail="Lesson has no quiz questions")
 
+    normalized_answers = json.dumps(
+        {str(key): value for key, value in sorted(request.answers.items(), key=lambda item: str(item[0]))},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    submission_hash = hashlib.sha256(
+        f"{current_user.id}:{lesson_id}:{normalized_answers}:{request.time_spent_seconds}".encode("utf-8")
+    ).hexdigest()
+    duplicate_attempt = (
+        db.query(models.LessonAttempt)
+        .filter(
+            models.LessonAttempt.user_id == current_user.id,
+            models.LessonAttempt.lesson_id == lesson_id,
+            models.LessonAttempt.submission_hash == submission_hash,
+        )
+        .first()
+    )
+
     total_points = sum(question.points for question in questions)
     awarded_points = 0
     correct_count = 0
     results = []
+    difficulty_adjustments = []
 
     for question in questions:
         submitted = (request.answers.get(question.id) or "").strip().lower()
@@ -645,8 +722,40 @@ def submit_lesson_quiz(
                 "points": question.points,
             }
         )
+        if not duplicate_attempt:
+            difficulty_adjustments.append(
+                evaluate_difficulty(
+                    db,
+                    current_user.id,
+                    question.skill or question.skill_type,
+                    is_correct,
+                    context={
+                        "source": "lesson_quiz",
+                        "lesson_id": lesson_id,
+                        "question_id": question.id,
+                        "attempt_id": duplicate_attempt.id if duplicate_attempt else None,
+                        "event_id": f"lesson_quiz:{submission_hash}:{question.id}",
+                        "answer_hash": submission_hash,
+                    },
+                    commit=False,
+                )
+            )
 
     score = round((awarded_points / total_points) * 100, 2) if total_points else 0
+    if duplicate_attempt:
+        progress = _get_or_create_lesson_progress(db, current_user.id, lesson_id)
+        _sync_progress_metadata(progress, lesson)
+        return {
+            "score": duplicate_attempt.score,
+            "total_points": duplicate_attempt.total_points,
+            "correct_answers": duplicate_attempt.correct_answers,
+            "total_questions": duplicate_attempt.total_questions,
+            "passed": duplicate_attempt.score >= 60,
+            "progress": progress,
+            "results": results,
+            "difficulty_adjustments": [],
+        }
+
     progress = _get_or_create_lesson_progress(db, current_user.id, lesson_id)
     _sync_progress_metadata(progress, lesson)
     now = datetime.now(timezone.utc)
@@ -674,6 +783,7 @@ def submit_lesson_quiz(
         correct_answers=correct_count,
         total_questions=len(questions),
         time_spent_seconds=request.time_spent_seconds,
+        submission_hash=submission_hash,
         completed_at=now,
     )
     db.add(attempt)
@@ -687,6 +797,7 @@ def submit_lesson_quiz(
         "passed": score >= 60,
         "progress": progress,
         "results": results,
+        "difficulty_adjustments": difficulty_adjustments,
     }
 
 
@@ -709,3 +820,26 @@ def learning_plan_me(
     db: Session = Depends(get_db),
 ):
     return learning_plan(db, current_user)
+
+
+@app.get("/personalization/me", response_model=PersonalizationProfileResponse)
+def personalization_me(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    progress_records = (
+        db.query(models.LearnerProgress)
+        .filter(models.LearnerProgress.user_id == current_user.id)
+        .options(joinedload(models.LearnerProgress.lesson))
+        .all()
+    )
+    return build_personalization_profile(current_user, progress_records)
+
+
+@app.get("/difficulty/me", response_model=StartingDifficultyResponse)
+def starting_difficulty_me(
+    skill: str | None = Query(default=None),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return build_starting_difficulty_profile(db, current_user, skill=skill)
