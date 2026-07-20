@@ -138,6 +138,388 @@ def _rebuild_users_with_nullable_profile_columns(engine: Engine) -> None:
             connection.execute(text("PRAGMA foreign_keys=ON"))
 
 
+def _create_generated_learning_plan_tables(engine: Engine) -> None:
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS learning_plans ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "status VARCHAR(30) NOT NULL DEFAULT 'pending', "
+        "comfortable_language VARCHAR(10) NOT NULL, "
+        "learning_language VARCHAR(10) NOT NULL, "
+        "learner_summary TEXT NOT NULL, "
+        "weakest_skills TEXT NOT NULL DEFAULT '[]', "
+        "strongest_skills TEXT NOT NULL DEFAULT '[]', "
+        "generation_model VARCHAR(100), "
+        "generation_version VARCHAR(100) NOT NULL, "
+        "is_active BOOLEAN NOT NULL DEFAULT 1, "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "generated_at DATETIME, "
+        "CONSTRAINT ck_learning_plans_status CHECK (status in ('pending', 'generating', 'ready', 'failed'))"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS generated_courses ("
+        "id INTEGER PRIMARY KEY, "
+        "learning_plan_id INTEGER NOT NULL REFERENCES learning_plans(id), "
+        "title VARCHAR(255) NOT NULL, "
+        "description TEXT NOT NULL, "
+        "primary_skill VARCHAR(30) NOT NULL, "
+        "difficulty INTEGER NOT NULL, "
+        "sequence_order INTEGER NOT NULL, "
+        "is_unlocked BOOLEAN NOT NULL DEFAULT 0, "
+        "completion_status VARCHAR(30) NOT NULL DEFAULT 'not_started', "
+        "CONSTRAINT ck_generated_courses_primary_skill CHECK (primary_skill in ('reading', 'writing', 'grammar', 'vocabulary', 'listening', 'speaking', 'comprehension')), "
+        "CONSTRAINT ck_generated_courses_difficulty_range CHECK (difficulty >= 1 and difficulty <= 5), "
+        "CONSTRAINT ck_generated_courses_sequence_positive CHECK (sequence_order > 0), "
+        "CONSTRAINT ck_generated_courses_completion_status CHECK (completion_status in ('not_started', 'in_progress', 'completed')), "
+        "CONSTRAINT uq_generated_courses_plan_sequence UNIQUE (learning_plan_id, sequence_order)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS generated_modules ("
+        "id INTEGER PRIMARY KEY, "
+        "generated_course_id INTEGER NOT NULL REFERENCES generated_courses(id), "
+        "title VARCHAR(255) NOT NULL, "
+        "description TEXT NOT NULL, "
+        "sequence_order INTEGER NOT NULL, "
+        "CONSTRAINT ck_generated_modules_sequence_positive CHECK (sequence_order > 0), "
+        "CONSTRAINT uq_generated_modules_course_sequence UNIQUE (generated_course_id, sequence_order)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS generated_lesson_plans ("
+        "id INTEGER PRIMARY KEY, "
+        "generated_module_id INTEGER NOT NULL REFERENCES generated_modules(id), "
+        "title VARCHAR(255) NOT NULL, "
+        "learning_objective TEXT NOT NULL, "
+        "skill VARCHAR(30) NOT NULL, "
+        "difficulty INTEGER NOT NULL, "
+        "sequence_order INTEGER NOT NULL, "
+        "content_status VARCHAR(30) NOT NULL DEFAULT 'not_generated', "
+        "CONSTRAINT ck_generated_lesson_plans_skill CHECK (skill in ('reading', 'writing', 'grammar', 'vocabulary', 'listening', 'speaking', 'comprehension')), "
+        "CONSTRAINT ck_generated_lesson_plans_difficulty_range CHECK (difficulty >= 1 and difficulty <= 5), "
+        "CONSTRAINT ck_generated_lesson_plans_sequence_positive CHECK (sequence_order > 0), "
+        "CONSTRAINT ck_generated_lesson_plans_content_status CHECK (content_status in ('not_generated', 'generating', 'ready', 'failed')), "
+        "CONSTRAINT uq_generated_lesson_plans_module_sequence UNIQUE (generated_module_id, sequence_order)"
+        ")",
+    )
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS ix_learning_plans_user_id ON learning_plans(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_learning_plans_status ON learning_plans(status)",
+        "CREATE INDEX IF NOT EXISTS ix_learning_plans_is_active ON learning_plans(is_active)",
+        "CREATE INDEX IF NOT EXISTS ix_learning_plans_user_status ON learning_plans(user_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_learning_plans_user_languages ON learning_plans(user_id, comfortable_language, learning_language)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_learning_plans_user_active ON learning_plans(user_id) WHERE is_active = 1",
+        "CREATE INDEX IF NOT EXISTS ix_generated_courses_learning_plan_id ON generated_courses(learning_plan_id)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_courses_primary_skill ON generated_courses(primary_skill)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_courses_difficulty ON generated_courses(difficulty)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_courses_is_unlocked ON generated_courses(is_unlocked)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_courses_completion_status ON generated_courses(completion_status)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_courses_plan_order ON generated_courses(learning_plan_id, sequence_order)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_modules_generated_course_id ON generated_modules(generated_course_id)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_modules_course_order ON generated_modules(generated_course_id, sequence_order)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_lesson_plans_generated_module_id ON generated_lesson_plans(generated_module_id)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_lesson_plans_skill ON generated_lesson_plans(skill)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_lesson_plans_difficulty ON generated_lesson_plans(difficulty)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_lesson_plans_content_status ON generated_lesson_plans(content_status)",
+        "CREATE INDEX IF NOT EXISTS ix_generated_lesson_plans_module_order ON generated_lesson_plans(generated_module_id, sequence_order)",
+    ]:
+        _execute(engine, statement)
+
+
+def _create_gamification_tables(engine: Engine) -> None:
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS xp_transactions ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "amount INTEGER NOT NULL, "
+        "source_type VARCHAR(50) NOT NULL, "
+        "source_id INTEGER NOT NULL, "
+        "reward_key VARCHAR(100) NOT NULL, "
+        "description_key VARCHAR(120) NOT NULL, "
+        "metadata_json TEXT NOT NULL DEFAULT '{}', "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_xp_transactions_amount_positive CHECK (amount > 0), "
+        "CONSTRAINT uq_xp_transaction_reward_once UNIQUE (user_id, source_type, source_id, reward_key)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS gamification_summaries ("
+        "user_id INTEGER PRIMARY KEY REFERENCES users(id), "
+        "total_xp INTEGER NOT NULL DEFAULT 0, "
+        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_gamification_summaries_total_xp_non_negative CHECK (total_xp >= 0)"
+        ")",
+    )
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS ix_xp_transactions_user_id ON xp_transactions(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_xp_transactions_source_type ON xp_transactions(source_type)",
+        "CREATE INDEX IF NOT EXISTS ix_xp_transactions_source_id ON xp_transactions(source_id)",
+        "CREATE INDEX IF NOT EXISTS ix_xp_transactions_reward_key ON xp_transactions(reward_key)",
+        "CREATE INDEX IF NOT EXISTS ix_xp_transactions_created_at ON xp_transactions(created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_xp_transactions_user_created ON xp_transactions(user_id, created_at)",
+    ]:
+        _execute(engine, statement)
+
+
+def _create_streak_tables(engine: Engine) -> None:
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS streak_summaries ("
+        "user_id INTEGER PRIMARY KEY REFERENCES users(id), "
+        "current_streak INTEGER NOT NULL DEFAULT 0, "
+        "longest_streak INTEGER NOT NULL DEFAULT 0, "
+        "last_activity_date DATE, "
+        "streak_started_at DATETIME, "
+        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_streak_summaries_current_non_negative CHECK (current_streak >= 0), "
+        "CONSTRAINT ck_streak_summaries_longest_non_negative CHECK (longest_streak >= 0)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS daily_streak_activities ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "activity_date DATE NOT NULL, "
+        "first_qualified_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "source_type VARCHAR(50) NOT NULL, "
+        "source_id INTEGER NOT NULL, "
+        "CONSTRAINT uq_daily_streak_activity_user_date UNIQUE (user_id, activity_date)"
+        ")",
+    )
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS ix_daily_streak_activities_user_id ON daily_streak_activities(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_daily_streak_activities_activity_date ON daily_streak_activities(activity_date)",
+        "CREATE INDEX IF NOT EXISTS ix_daily_streak_activities_source_type ON daily_streak_activities(source_type)",
+        "CREATE INDEX IF NOT EXISTS ix_daily_streak_activities_source_id ON daily_streak_activities(source_id)",
+        "CREATE INDEX IF NOT EXISTS ix_daily_streak_activities_user_date ON daily_streak_activities(user_id, activity_date)",
+    ]:
+        _execute(engine, statement)
+
+
+def _create_badge_tables(engine: Engine) -> None:
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS badges ("
+        "id INTEGER PRIMARY KEY, "
+        "badge_key VARCHAR(100) NOT NULL UNIQUE, "
+        "name_key VARCHAR(160) NOT NULL, "
+        "description_key VARCHAR(160) NOT NULL, "
+        "category VARCHAR(50) NOT NULL, "
+        "icon_key VARCHAR(50) NOT NULL, "
+        "requirement_type VARCHAR(50) NOT NULL, "
+        "requirement_value INTEGER NOT NULL, "
+        "is_active BOOLEAN NOT NULL DEFAULT 1, "
+        "CONSTRAINT ck_badges_requirement_value_non_negative CHECK (requirement_value >= 0)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS user_badges ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "badge_id INTEGER NOT NULL REFERENCES badges(id), "
+        "earned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "source_type VARCHAR(50) NOT NULL, "
+        "source_id INTEGER NOT NULL, "
+        "CONSTRAINT uq_user_badges_user_badge UNIQUE (user_id, badge_id)"
+        ")",
+    )
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS ix_badges_badge_key ON badges(badge_key)",
+        "CREATE INDEX IF NOT EXISTS ix_badges_category ON badges(category)",
+        "CREATE INDEX IF NOT EXISTS ix_badges_requirement_type ON badges(requirement_type)",
+        "CREATE INDEX IF NOT EXISTS ix_badges_is_active ON badges(is_active)",
+        "CREATE INDEX IF NOT EXISTS ix_user_badges_user_id ON user_badges(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_user_badges_badge_id ON user_badges(badge_id)",
+        "CREATE INDEX IF NOT EXISTS ix_user_badges_earned_at ON user_badges(earned_at)",
+        "CREATE INDEX IF NOT EXISTS ix_user_badges_source_type ON user_badges(source_type)",
+        "CREATE INDEX IF NOT EXISTS ix_user_badges_source_id ON user_badges(source_id)",
+        "CREATE INDEX IF NOT EXISTS ix_user_badges_user_earned ON user_badges(user_id, earned_at)",
+    ]:
+        _execute(engine, statement)
+
+
+def _create_flashcard_tables(engine: Engine) -> None:
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS flashcard_decks ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "lesson_id INTEGER REFERENCES lessons(id), "
+        "generated_lesson_plan_id INTEGER REFERENCES generated_lesson_plans(id), "
+        "title VARCHAR(255) NOT NULL, "
+        "skill VARCHAR(30) NOT NULL, "
+        "learning_language VARCHAR(10) NOT NULL, "
+        "comfortable_language VARCHAR(10) NOT NULL, "
+        "is_active BOOLEAN NOT NULL DEFAULT 1, "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_flashcard_decks_skill CHECK (skill in ('reading', 'writing', 'grammar', 'vocabulary', 'listening', 'speaking', 'comprehension')), "
+        "CONSTRAINT ck_flashcard_decks_learning_language CHECK (learning_language in ('en', 'hi', 'ta', 'te', 'kn')), "
+        "CONSTRAINT ck_flashcard_decks_comfortable_language CHECK (comfortable_language in ('en', 'hi', 'ta', 'te', 'kn')), "
+        "CONSTRAINT ck_flashcard_decks_has_source CHECK (lesson_id is not null or generated_lesson_plan_id is not null), "
+        "CONSTRAINT uq_flashcard_decks_user_lesson_title UNIQUE (user_id, lesson_id, title), "
+        "CONSTRAINT uq_flashcard_decks_user_generated_lesson_title UNIQUE (user_id, generated_lesson_plan_id, title)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS flashcards ("
+        "id INTEGER PRIMARY KEY, "
+        "deck_id INTEGER NOT NULL REFERENCES flashcard_decks(id), "
+        "front_text TEXT NOT NULL, "
+        "back_text TEXT NOT NULL, "
+        "example_text TEXT, "
+        "example_translation TEXT, "
+        "pronunciation_text TEXT, "
+        "sequence_order INTEGER NOT NULL, "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_flashcards_sequence_positive CHECK (sequence_order > 0), "
+        "CONSTRAINT uq_flashcards_deck_sequence UNIQUE (deck_id, sequence_order)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS flashcard_progress ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "flashcard_id INTEGER NOT NULL REFERENCES flashcards(id), "
+        "review_count INTEGER NOT NULL DEFAULT 0, "
+        "correct_count INTEGER NOT NULL DEFAULT 0, "
+        "incorrect_count INTEGER NOT NULL DEFAULT 0, "
+        "mastery_level INTEGER NOT NULL DEFAULT 0, "
+        "review_interval_days INTEGER NOT NULL DEFAULT 1, "
+        "next_review_at DATETIME, "
+        "last_reviewed_at DATETIME, "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT uq_flashcard_progress_user_card UNIQUE (user_id, flashcard_id), "
+        "CONSTRAINT ck_flashcard_progress_review_count_non_negative CHECK (review_count >= 0), "
+        "CONSTRAINT ck_flashcard_progress_correct_count_non_negative CHECK (correct_count >= 0), "
+        "CONSTRAINT ck_flashcard_progress_incorrect_count_non_negative CHECK (incorrect_count >= 0), "
+        "CONSTRAINT ck_flashcard_progress_mastery_range CHECK (mastery_level >= 0 and mastery_level <= 5), "
+        "CONSTRAINT ck_flashcard_progress_interval_positive CHECK (review_interval_days >= 1)"
+        ")",
+    )
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_user_id ON flashcard_decks(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_lesson_id ON flashcard_decks(lesson_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_generated_lesson_plan_id ON flashcard_decks(generated_lesson_plan_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_skill ON flashcard_decks(skill)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_learning_language ON flashcard_decks(learning_language)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_comfortable_language ON flashcard_decks(comfortable_language)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_is_active ON flashcard_decks(is_active)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_decks_user_active ON flashcard_decks(user_id, is_active)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcards_deck_id ON flashcards(deck_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcards_deck_order ON flashcards(deck_id, sequence_order)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_progress_user_id ON flashcard_progress(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_progress_flashcard_id ON flashcard_progress(flashcard_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_progress_mastery_level ON flashcard_progress(mastery_level)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_progress_next_review_at ON flashcard_progress(next_review_at)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_progress_last_reviewed_at ON flashcard_progress(last_reviewed_at)",
+        "CREATE INDEX IF NOT EXISTS ix_flashcard_progress_user_next_review ON flashcard_progress(user_id, next_review_at)",
+    ]:
+        _execute(engine, statement)
+
+
+def _create_puzzle_tables(engine: Engine) -> None:
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS puzzle_sets ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "lesson_id INTEGER REFERENCES lessons(id), "
+        "generated_lesson_plan_id INTEGER REFERENCES generated_lesson_plans(id), "
+        "title VARCHAR(255) NOT NULL, "
+        "skill VARCHAR(30) NOT NULL, "
+        "difficulty INTEGER NOT NULL, "
+        "learning_language VARCHAR(10) NOT NULL, "
+        "comfortable_language VARCHAR(10) NOT NULL, "
+        "is_active BOOLEAN NOT NULL DEFAULT 1, "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_puzzle_sets_skill CHECK (skill in ('reading', 'writing', 'grammar', 'vocabulary', 'listening', 'speaking', 'comprehension')), "
+        "CONSTRAINT ck_puzzle_sets_difficulty_range CHECK (difficulty >= 1 and difficulty <= 5), "
+        "CONSTRAINT ck_puzzle_sets_learning_language CHECK (learning_language in ('en', 'hi', 'ta', 'te', 'kn')), "
+        "CONSTRAINT ck_puzzle_sets_comfortable_language CHECK (comfortable_language in ('en', 'hi', 'ta', 'te', 'kn')), "
+        "CONSTRAINT ck_puzzle_sets_has_source CHECK (lesson_id is not null or generated_lesson_plan_id is not null), "
+        "CONSTRAINT uq_puzzle_sets_user_lesson_title UNIQUE (user_id, lesson_id, title), "
+        "CONSTRAINT uq_puzzle_sets_user_generated_lesson_title UNIQUE (user_id, generated_lesson_plan_id, title)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS puzzles ("
+        "id INTEGER PRIMARY KEY, "
+        "puzzle_set_id INTEGER NOT NULL REFERENCES puzzle_sets(id), "
+        "puzzle_type VARCHAR(30) NOT NULL, "
+        "instruction_text TEXT NOT NULL, "
+        "instruction_translation TEXT, "
+        "prompt_text TEXT, "
+        "prompt_translation TEXT, "
+        "puzzle_data_json TEXT NOT NULL, "
+        "answer_data_json TEXT NOT NULL, "
+        "sequence_order INTEGER NOT NULL, "
+        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT ck_puzzles_type CHECK (puzzle_type in ('jumbled_word', 'matching')), "
+        "CONSTRAINT ck_puzzles_sequence_positive CHECK (sequence_order > 0), "
+        "CONSTRAINT uq_puzzles_set_sequence UNIQUE (puzzle_set_id, sequence_order)"
+        ")",
+    )
+    _execute(
+        engine,
+        "CREATE TABLE IF NOT EXISTS puzzle_attempts ("
+        "id INTEGER PRIMARY KEY, "
+        "user_id INTEGER NOT NULL REFERENCES users(id), "
+        "puzzle_id INTEGER NOT NULL REFERENCES puzzles(id), "
+        "submitted_answer_json TEXT NOT NULL, "
+        "is_correct BOOLEAN NOT NULL, "
+        "score FLOAT NOT NULL DEFAULT 0, "
+        "attempt_number INTEGER NOT NULL, "
+        "completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "CONSTRAINT uq_puzzle_attempt_user_puzzle_number UNIQUE (user_id, puzzle_id, attempt_number), "
+        "CONSTRAINT ck_puzzle_attempts_score_range CHECK (score >= 0 and score <= 1), "
+        "CONSTRAINT ck_puzzle_attempts_number_positive CHECK (attempt_number > 0)"
+        ")",
+    )
+
+    for statement in [
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_user_id ON puzzle_sets(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_lesson_id ON puzzle_sets(lesson_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_generated_lesson_plan_id ON puzzle_sets(generated_lesson_plan_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_skill ON puzzle_sets(skill)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_difficulty ON puzzle_sets(difficulty)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_learning_language ON puzzle_sets(learning_language)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_comfortable_language ON puzzle_sets(comfortable_language)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_is_active ON puzzle_sets(is_active)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_sets_user_active ON puzzle_sets(user_id, is_active)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzles_puzzle_set_id ON puzzles(puzzle_set_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzles_puzzle_type ON puzzles(puzzle_type)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzles_set_order ON puzzles(puzzle_set_id, sequence_order)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_attempts_user_id ON puzzle_attempts(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_attempts_puzzle_id ON puzzle_attempts(puzzle_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_attempts_is_correct ON puzzle_attempts(is_correct)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_attempts_completed_at ON puzzle_attempts(completed_at)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_attempts_user_puzzle ON puzzle_attempts(user_id, puzzle_id)",
+        "CREATE INDEX IF NOT EXISTS ix_puzzle_attempts_user_completed ON puzzle_attempts(user_id, completed_at)",
+    ]:
+        _execute(engine, statement)
+
+
 def apply_sqlite_schema_updates(engine: Engine) -> None:
     """Apply additive SQLite schema changes for projects without Alembic.
 
@@ -150,6 +532,12 @@ def apply_sqlite_schema_updates(engine: Engine) -> None:
         return
 
     now = _quote_default(datetime.now(timezone.utc).isoformat())
+    _create_generated_learning_plan_tables(engine)
+    _create_gamification_tables(engine)
+    _create_streak_tables(engine)
+    _create_badge_tables(engine)
+    _create_flashcard_tables(engine)
+    _create_puzzle_tables(engine)
 
     user_columns = {
         "comfortable_language": "comfortable_language VARCHAR(50)",
@@ -207,6 +595,14 @@ def apply_sqlite_schema_updates(engine: Engine) -> None:
         _add_column_if_missing(engine, "learner_progress", column_name, ddl)
 
     _add_column_if_missing(engine, "lesson_attempts", "submission_hash", "submission_hash VARCHAR(128)")
+    _add_column_if_missing(engine, "assessment_answers", "submission_hash", "submission_hash VARCHAR(128)")
+    _add_column_if_missing(engine, "assessment_results", "final_skill_profile_json", "final_skill_profile_json TEXT")
+    _add_column_if_missing(
+        engine,
+        "assessment_attempt_questions",
+        "shuffled_tiles_json",
+        "shuffled_tiles_json TEXT",
+    )
 
     if not _table_exists(engine, "learner_skill_difficulties"):
         _execute(
@@ -258,6 +654,10 @@ def apply_sqlite_schema_updates(engine: Engine) -> None:
     if _table_exists(engine, "lesson_attempts"):
         index_statements.append(
             "CREATE INDEX IF NOT EXISTS ix_lesson_attempts_submission_hash ON lesson_attempts(user_id, lesson_id, submission_hash)"
+        )
+    if _table_exists(engine, "assessment_answers"):
+        index_statements.append(
+            "CREATE INDEX IF NOT EXISTS ix_assessment_answers_submission_hash ON assessment_answers(attempt_id, attempt_question_id, submission_hash)"
         )
     if _table_exists(engine, "learner_skill_difficulties"):
         index_statements.append(

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -17,6 +17,21 @@ QuestionComplexity = Literal["simple", "mixed", "complex"]
 SkillType = Literal["reading", "writing", "comprehension"]
 ProficiencyLevel = Literal["beginner", "intermediate", "advanced"]
 QuestionSkill = Literal["reading", "writing", "grammar", "vocabulary", "listening", "speaking", "comprehension"]
+AssessmentQuestionType = Literal[
+    "reading_mcq",
+    "copy_typing",
+    "sentence_completion",
+    "sentence_rearrange",
+    "short_response",
+    "mcq",
+    "fill_in_the_blank",
+    "speaking",
+    "spoken_answer",
+    "reading_aloud",
+    "sentence_repetition",
+    "pronunciation",
+    "spoken_fill_blank",
+]
 LessonQuestionType = Literal[
     "multiple_choice",
     "fill_in_the_blank",
@@ -27,6 +42,8 @@ LessonQuestionType = Literal[
     "listening",
 ]
 ProgressStatus = Literal["not_started", "in_progress", "completed"]
+LearningPlanStatus = Literal["pending", "generating", "ready", "failed"]
+GeneratedLessonContentStatus = Literal["not_generated", "generating", "ready", "failed"]
 ContentType = Literal[
     "text",
     "image",
@@ -41,7 +58,7 @@ ContentType = Literal[
     "dictation",
     "quiz",
 ]
-SUPPORTED_LANGUAGES = {"en", "hi", "ta", "te"}
+SUPPORTED_LANGUAGES = {"en", "hi", "ta", "te", "kn"}
 
 
 def normalize_language(value: str) -> str:
@@ -53,10 +70,25 @@ def normalize_language(value: str) -> str:
         return "ta"
     if normalized_value in {"te", "telugu", "తెలుగు"}:
         return "te"
+    if normalized_value in {"kn", "kannada", "kn-in", "ಕನ್ನಡ"}:
+        return "kn"
     if normalized_value in {"en", "english"}:
         return "en"
 
     raise ValueError("Unsupported language")
+
+
+def _validate_unique_sequence(items: list[BaseModel], item_name: str) -> None:
+    sequence_values = [getattr(item, "sequence_order") for item in items]
+    if len(sequence_values) != len(set(sequence_values)):
+        raise ValueError(f"{item_name} sequence_order values must be unique")
+
+
+def _strip_required(value: str) -> str:
+    cleaned_value = value.strip()
+    if not cleaned_value:
+        raise ValueError("Field must not be empty")
+    return cleaned_value
 
 
 class UserCreate(BaseModel):
@@ -169,6 +201,13 @@ class AssessmentStatusResponse(BaseModel):
 class AssessmentOptionResponse(BaseModel):
     id: str
     text: str
+    translation: Optional[str] = None
+
+
+class AssessmentTileResponse(BaseModel):
+    id: str
+    value: str
+    translation: Optional[str] = None
 
 
 class AssessmentQuestionResponse(BaseModel):
@@ -176,7 +215,7 @@ class AssessmentQuestionResponse(BaseModel):
     attempt_question_id: int
     section: str
     display_order: int
-    question_type: LessonQuestionType
+    question_type: AssessmentQuestionType
     difficulty: str
     difficulty_rating: Optional[int] = Field(default=None, ge=1, le=5)
     skill: Optional[QuestionSkill] = None
@@ -184,8 +223,20 @@ class AssessmentQuestionResponse(BaseModel):
     experience_level: Optional[ExperienceLevel] = None
     comfortable_language: Optional[str] = None
     learning_language: Optional[str] = None
+    tts_text: Optional[str] = None
+    tts_read_options: Optional[list[str]] = None
+    input_mode: Optional[Literal["letter_tiles", "word_tiles", "voice"]] = None
+    shuffled_tiles: Optional[list[AssessmentTileResponse]] = None
+    speech_language: Optional[str] = None
+    stt_enabled: Optional[bool] = None
     passage: Optional[str] = None
+    passage_translation: Optional[str] = None
     prompt: str
+    prompt_translation: Optional[str] = None
+    instruction_text: Optional[str] = None
+    target_text: Optional[str] = None
+    target_translation: Optional[str] = None
+    translation_language: Optional[str] = None
     options: Optional[list[AssessmentOptionResponse]] = None
     marks: int
     skill_tag: str
@@ -204,13 +255,35 @@ class AssessmentAttemptResponse(BaseModel):
     language: str
     status: str
     started_at: datetime
-    sections: list[AssessmentSectionResponse]
-    answers: dict[str, dict]
+    answered_questions: int = 0
+    total_questions: int = 0
+    completed_skills: list[QuestionSkill] = Field(default_factory=list)
+    current_question: Optional[AssessmentQuestionResponse] = None
+    assessment_complete: bool = False
+    final_skill_profile: dict[QuestionSkill, int] = Field(default_factory=dict)
 
 
 class AssessmentAnswerInput(BaseModel):
     attempt_question_id: int
     answer: dict
+
+
+class AssessmentAnswerRequest(BaseModel):
+    attempt_question_id: int
+    answer: dict
+
+
+class AssessmentSpokenAnswerRequest(BaseModel):
+    attempt_question_id: int
+    spoken_text: str = Field(..., min_length=1)
+
+    @field_validator("spoken_text")
+    @classmethod
+    def validate_spoken_text(cls, value: str) -> str:
+        cleaned_value = value.strip()
+        if not cleaned_value:
+            raise ValueError("Required answer missing")
+        return cleaned_value
 
 
 class AssessmentAnswersRequest(BaseModel):
@@ -231,7 +304,27 @@ class AssessmentResultResponse(BaseModel):
     mcq_score: float
     overall_score: float
     proficiency_level: str
+    final_skill_profile: dict[QuestionSkill, int] = Field(default_factory=dict)
     difficulty_adjustments: list["AdaptiveDifficultyResponse"] = Field(default_factory=list)
+
+
+class AssessmentAnswerResponse(BaseModel):
+    correct: bool
+    skill: QuestionSkill
+    question_id: int
+    attempt_question_id: int
+    difficulty: "AdaptiveDifficultyResponse"
+    answered_questions: int
+    total_questions: int
+    completed_skills: list[QuestionSkill] = Field(default_factory=list)
+    next_question: Optional[AssessmentQuestionResponse] = None
+    assessment_complete: bool = False
+    final_skill_profile: dict[QuestionSkill, int] = Field(default_factory=dict)
+    result: Optional[AssessmentResultResponse] = None
+    duplicate_submission: bool = False
+    feedback: Optional[str] = None
+    model_used: Optional[str] = None
+    attempt_status: Optional[str] = None
 
 
 class CourseResponse(BaseModel):
@@ -298,6 +391,8 @@ class LessonResponse(BaseModel):
     xp_reward: int
     is_published: bool
     is_active: bool
+    is_unlocked: Optional[bool] = None
+    locked: Optional[bool] = None
     is_unlocked: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
@@ -644,6 +739,181 @@ class LessonQuizSubmitResponse(BaseModel):
     difficulty_adjustments: list["AdaptiveDifficultyResponse"] = Field(default_factory=list)
 
 
+class XPTransactionResponse(BaseModel):
+    id: int
+    amount: int
+    source_type: str
+    source_id: int
+    reward_key: str
+    description_key: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class XPSummaryResponse(BaseModel):
+    total_xp: int
+    xp_earned_this_week: int
+    recent_transactions: list[XPTransactionResponse] = Field(default_factory=list)
+    current_streak: int = Field(..., ge=0)
+    longest_streak: int = Field(..., ge=0)
+    last_activity_date: Optional[date] = None
+    completed_today: bool
+    next_streak_message_key: str
+    streak_timezone: str
+
+
+class BadgeResponse(BaseModel):
+    badge_key: str
+    name_key: str
+    description_key: str
+    category: str
+    icon_key: str
+    requirement_type: str
+    requirement_value: int
+    is_active: bool
+    earned_at: Optional[datetime] = None
+    source_type: Optional[str] = None
+    source_id: Optional[int] = None
+
+
+class BadgeSummaryResponse(BaseModel):
+    earned_badges: list[BadgeResponse] = Field(default_factory=list)
+    locked_badges: list[BadgeResponse] = Field(default_factory=list)
+    earned_count: int = Field(..., ge=0)
+    total_count: int = Field(..., ge=0)
+    recently_earned_badges: list[BadgeResponse] = Field(default_factory=list)
+
+
+class FlashcardProgressResponse(BaseModel):
+    id: int
+    user_id: int
+    flashcard_id: int
+    review_count: int = Field(..., ge=0)
+    correct_count: int = Field(..., ge=0)
+    incorrect_count: int = Field(..., ge=0)
+    mastery_level: int = Field(..., ge=0, le=5)
+    review_interval_days: int = Field(..., ge=1)
+    next_review_at: Optional[datetime] = None
+    last_reviewed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlashcardResponse(BaseModel):
+    id: int
+    deck_id: int
+    front_text: str
+    back_text: str
+    example_text: Optional[str] = None
+    example_translation: Optional[str] = None
+    pronunciation_text: Optional[str] = None
+    sequence_order: int = Field(..., gt=0)
+    created_at: datetime
+    progress: Optional[FlashcardProgressResponse] = None
+
+
+class FlashcardDeckProgressResponse(BaseModel):
+    total_cards: int = Field(..., ge=0)
+    due_cards: int = Field(..., ge=0)
+    reviewed_cards: int = Field(..., ge=0)
+    mastered_cards: int = Field(..., ge=0)
+
+
+class FlashcardDeckResponse(BaseModel):
+    id: int
+    user_id: int
+    lesson_id: Optional[int] = None
+    generated_lesson_plan_id: Optional[int] = None
+    title: str
+    skill: QuestionSkill
+    learning_language: str
+    comfortable_language: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    progress: FlashcardDeckProgressResponse
+    cards: list[FlashcardResponse] = Field(default_factory=list)
+
+
+FlashcardReviewOutcome = Literal["need_practice", "know"]
+
+
+class FlashcardReviewRequest(BaseModel):
+    outcome: FlashcardReviewOutcome
+
+
+class FlashcardReviewResponse(BaseModel):
+    flashcard: FlashcardResponse
+    progress: FlashcardProgressResponse
+    deck_progress: FlashcardDeckProgressResponse
+    xp_earned: int = Field(..., ge=0)
+    xp_transaction_id: Optional[int] = None
+
+
+PuzzleType = Literal["jumbled_word", "matching"]
+
+
+class PuzzleResponse(BaseModel):
+    id: int
+    puzzle_set_id: int
+    puzzle_type: PuzzleType
+    instruction_text: str
+    instruction_translation: Optional[str] = None
+    prompt_text: Optional[str] = None
+    prompt_translation: Optional[str] = None
+    puzzle_data: dict[str, Any]
+    sequence_order: int = Field(..., gt=0)
+    created_at: datetime
+
+
+class PuzzleSetProgressResponse(BaseModel):
+    total_puzzles: int = Field(..., ge=0)
+    attempted_puzzles: int = Field(..., ge=0)
+    correct_puzzles: int = Field(..., ge=0)
+    accuracy_percentage: float = Field(..., ge=0, le=100)
+    is_complete: bool
+
+
+class PuzzleSetResponse(BaseModel):
+    id: int
+    user_id: int
+    lesson_id: Optional[int] = None
+    generated_lesson_plan_id: Optional[int] = None
+    title: str
+    skill: QuestionSkill
+    difficulty: int = Field(..., ge=1, le=5)
+    learning_language: str
+    comfortable_language: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    progress: PuzzleSetProgressResponse
+    puzzles: list[PuzzleResponse] = Field(default_factory=list)
+
+
+class PuzzleAttemptRequest(BaseModel):
+    submitted_answer: Any
+
+
+class PuzzleAttemptRecordResponse(BaseModel):
+    id: int
+    user_id: int
+    puzzle_id: int
+    submitted_answer: Any
+    is_correct: bool
+    score: float = Field(..., ge=0, le=1)
+    attempt_number: int = Field(..., gt=0)
+    completed_at: datetime
+
+
+class PuzzleAttemptResponse(BaseModel):
+    attempt: PuzzleAttemptRecordResponse
+    puzzle_set_progress: PuzzleSetProgressResponse
+    xp_earned: int = Field(..., ge=0)
+    xp_transaction_id: Optional[int] = None
+
+
 class RecommendedLessonResponse(BaseModel):
     lesson_id: int
     title: str
@@ -654,12 +924,16 @@ class RecommendedLessonResponse(BaseModel):
     course_id: int
     course_title: str
     course_order: int
+    module_id: Optional[int] = None
     module_order: int
+    sequence_order: int
     lesson_order: int
     estimated_duration_minutes: int
     recommendation_score: float
     recommendation_reason: str
+    is_unlocked: bool = True
     current_progress_status: ProgressStatus
+    completion_status: ProgressStatus
 
 
 class CompletionSummaryResponse(BaseModel):
@@ -753,3 +1027,158 @@ class AdaptiveDifficultyResponse(BaseModel):
     adjusted: bool
     reason: str
     updated_at: datetime
+
+
+class GeneratedLessonPlanAIOutput(BaseModel):
+    title: str = Field(..., min_length=1)
+    learning_objective: str = Field(..., min_length=1)
+    skill: QuestionSkill
+    difficulty: int = Field(..., ge=1, le=5)
+    sequence_order: int = Field(..., gt=0)
+    content_status: GeneratedLessonContentStatus = "not_generated"
+
+    @field_validator("title", "learning_objective")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        return _strip_required(value)
+
+
+class GeneratedModuleAIOutput(BaseModel):
+    title: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    sequence_order: int = Field(..., gt=0)
+    lesson_plans: list[GeneratedLessonPlanAIOutput] = Field(..., min_length=1)
+
+    @field_validator("title", "description")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        return _strip_required(value)
+
+    @model_validator(mode="after")
+    def validate_lesson_sequence(self):
+        _validate_unique_sequence(self.lesson_plans, "Lesson plan")
+        return self
+
+
+class GeneratedCourseAIOutput(BaseModel):
+    title: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    primary_skill: QuestionSkill
+    difficulty: int = Field(..., ge=1, le=5)
+    sequence_order: int = Field(..., gt=0)
+    is_unlocked: bool = False
+    completion_status: ProgressStatus = "not_started"
+    modules: list[GeneratedModuleAIOutput] = Field(..., min_length=1)
+
+    @field_validator("title", "description")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        return _strip_required(value)
+
+    @model_validator(mode="after")
+    def validate_module_sequence(self):
+        _validate_unique_sequence(self.modules, "Module")
+        return self
+
+
+class LearningPlanAIOutput(BaseModel):
+    status: LearningPlanStatus = "ready"
+    comfortable_language: str = Field(..., min_length=1)
+    learning_language: str = Field(..., min_length=1)
+    learner_summary: str = Field(..., min_length=1)
+    weakest_skills: list[QuestionSkill] = Field(default_factory=list)
+    strongest_skills: list[QuestionSkill] = Field(default_factory=list)
+    generation_model: Optional[str] = None
+    generation_version: str = Field(..., min_length=1)
+    courses: list[GeneratedCourseAIOutput] = Field(..., min_length=1)
+
+    @field_validator("comfortable_language", "learning_language")
+    @classmethod
+    def validate_language(cls, value: str) -> str:
+        return normalize_language_value(value)
+
+    @field_validator("learner_summary", "generation_version")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        return _strip_required(value)
+
+    @field_validator("generation_model")
+    @classmethod
+    def validate_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _strip_required(value)
+
+    @model_validator(mode="after")
+    def validate_initial_unlock(self):
+        _validate_unique_sequence(self.courses, "Course")
+        unlocked_courses = [course for course in self.courses if course.is_unlocked]
+        if len(unlocked_courses) != 1:
+            raise ValueError("Exactly one generated course must be initially unlocked")
+
+        first_course = min(self.courses, key=lambda course: course.sequence_order)
+        if unlocked_courses[0].sequence_order != first_course.sequence_order:
+            raise ValueError("The first generated course by sequence_order must be initially unlocked")
+        return self
+
+
+class LearningPlanCreateRequest(BaseModel):
+    user_id: int = Field(..., gt=0)
+    plan: LearningPlanAIOutput
+
+
+class GeneratedLessonPlanResponse(BaseModel):
+    id: int
+    generated_module_id: int
+    title: str
+    learning_objective: str
+    skill: QuestionSkill
+    difficulty: int = Field(..., ge=1, le=5)
+    sequence_order: int = Field(..., gt=0)
+    content_status: GeneratedLessonContentStatus
+
+    model_config = {"from_attributes": True}
+
+
+class GeneratedModuleResponse(BaseModel):
+    id: int
+    generated_course_id: int
+    title: str
+    description: str
+    sequence_order: int = Field(..., gt=0)
+    lesson_plans: list[GeneratedLessonPlanResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class GeneratedCourseResponse(BaseModel):
+    id: int
+    learning_plan_id: int
+    title: str
+    description: str
+    primary_skill: QuestionSkill
+    difficulty: int = Field(..., ge=1, le=5)
+    sequence_order: int = Field(..., gt=0)
+    is_unlocked: bool
+    completion_status: ProgressStatus
+    modules: list[GeneratedModuleResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class LearningPlanResponse(BaseModel):
+    id: int
+    user_id: int
+    status: LearningPlanStatus
+    comfortable_language: str
+    learning_language: str
+    learner_summary: str
+    weakest_skills: list[QuestionSkill] = Field(default_factory=list)
+    strongest_skills: list[QuestionSkill] = Field(default_factory=list)
+    generation_model: Optional[str] = None
+    generation_version: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    generated_at: Optional[datetime] = None
+    courses: list[GeneratedCourseResponse] = Field(default_factory=list)

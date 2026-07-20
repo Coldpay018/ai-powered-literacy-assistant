@@ -12,12 +12,16 @@ export type RecommendedLesson = {
   course_id: number;
   course_title: string;
   course_order: number;
+  module_id?: number | null;
   module_order: number;
+  sequence_order: number;
   lesson_order: number;
   estimated_duration_minutes: number;
   recommendation_score: number;
   recommendation_reason: string;
+  is_unlocked: boolean;
   current_progress_status: ProgressStatus;
+  completion_status: ProgressStatus;
 };
 
 export type LearningPlan = {
@@ -154,6 +158,175 @@ export type ProgressRecord = LearnerProgress & {
   lesson_title?: string;
   course_title?: string;
   module_title?: string;
+};
+
+export type XPTransaction = {
+  id: number;
+  amount: number;
+  source_type: string;
+  source_id: number;
+  reward_key: string;
+  description_key: string;
+  created_at: string;
+};
+
+export type XPSummary = {
+  total_xp: number;
+  xp_earned_this_week: number;
+  recent_transactions: XPTransaction[];
+  current_streak: number;
+  longest_streak: number;
+  last_activity_date: string | null;
+  completed_today: boolean;
+  next_streak_message_key: string;
+  streak_timezone: string;
+};
+
+export type Badge = {
+  badge_key: string;
+  name_key: string;
+  description_key: string;
+  category: string;
+  icon_key: string;
+  requirement_type: string;
+  requirement_value: number;
+  is_active: boolean;
+  earned_at: string | null;
+  source_type: string | null;
+  source_id: number | null;
+};
+
+export type BadgeSummary = {
+  earned_badges: Badge[];
+  locked_badges: Badge[];
+  earned_count: number;
+  total_count: number;
+  recently_earned_badges: Badge[];
+};
+
+export type FlashcardProgress = {
+  id: number;
+  user_id: number;
+  flashcard_id: number;
+  review_count: number;
+  correct_count: number;
+  incorrect_count: number;
+  mastery_level: number;
+  review_interval_days: number;
+  next_review_at: string | null;
+  last_reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Flashcard = {
+  id: number;
+  deck_id: number;
+  front_text: string;
+  back_text: string;
+  example_text: string | null;
+  example_translation: string | null;
+  pronunciation_text: string | null;
+  sequence_order: number;
+  created_at: string;
+  progress: FlashcardProgress | null;
+};
+
+export type FlashcardDeckProgress = {
+  total_cards: number;
+  due_cards: number;
+  reviewed_cards: number;
+  mastered_cards: number;
+};
+
+export type FlashcardDeck = {
+  id: number;
+  user_id: number;
+  lesson_id: number | null;
+  generated_lesson_plan_id: number | null;
+  title: string;
+  skill: string;
+  learning_language: string;
+  comfortable_language: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  progress: FlashcardDeckProgress;
+  cards: Flashcard[];
+};
+
+export type FlashcardReviewResponse = {
+  flashcard: Flashcard;
+  progress: FlashcardProgress;
+  deck_progress: FlashcardDeckProgress;
+  xp_earned: number;
+  xp_transaction_id: number | null;
+};
+
+export type PuzzleType = "jumbled_word" | "matching";
+
+export type MatchingItem = {
+  id: string;
+  text: string;
+};
+
+export type Puzzle = {
+  id: number;
+  puzzle_set_id: number;
+  puzzle_type: PuzzleType;
+  instruction_text: string;
+  instruction_translation: string | null;
+  prompt_text: string | null;
+  prompt_translation: string | null;
+  puzzle_data: {
+    tiles?: string[];
+    clue?: string;
+    left_items?: MatchingItem[];
+    right_items?: MatchingItem[];
+  };
+  sequence_order: number;
+  created_at: string;
+};
+
+export type PuzzleSetProgress = {
+  total_puzzles: number;
+  attempted_puzzles: number;
+  correct_puzzles: number;
+  accuracy_percentage: number;
+  is_complete: boolean;
+};
+
+export type PuzzleSet = {
+  id: number;
+  user_id: number;
+  lesson_id: number | null;
+  generated_lesson_plan_id: number | null;
+  title: string;
+  skill: string;
+  difficulty: number;
+  learning_language: string;
+  comfortable_language: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  progress: PuzzleSetProgress;
+  puzzles: Puzzle[];
+};
+
+export type PuzzleAttemptResponse = {
+  attempt: {
+    id: number;
+    user_id: number;
+    puzzle_id: number;
+    submitted_answer: unknown;
+    is_correct: boolean;
+    score: number;
+    attempt_number: number;
+    completed_at: string;
+  };
+  puzzle_set_progress: PuzzleSetProgress;
+  xp_earned: number;
+  xp_transaction_id: number | null;
 };
 
 export type CourseLessonSummary = {

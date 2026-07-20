@@ -25,19 +25,17 @@ import type {
   AssessmentStatusResponse,
 } from "@/lib/assessment/types";
 import {
+  getBadgeSummary,
   getLearningPlan,
   getProgressRecords,
-  getCourseDetail,
+  getXPSummary,
 } from "@/lib/learning/api";
-import {
-  resolveCourseEntryLessonId,
-  resolveMostRecentInProgressLessonId,
-} from "@/lib/learning/entry";
 import type {
-  CourseDetail,
+  BadgeSummary,
   LearningPlan,
   ProgressRecord,
   RecommendedLesson,
+  XPSummary,
 } from "@/lib/learning/types";
 import {
   clearStoredUiLanguage,
@@ -93,11 +91,6 @@ const prototypeDashboardData: DashboardPrototypeData = {
       detailKey: "dashboard.activitiesCompletedDetail",
     },
     {
-      labelKey: "dashboard.learningStreak",
-      valueKey: "dashboard.learningStreakValue",
-      detailKey: "dashboard.learningStreakDetail",
-    },
-    {
       labelKey: "dashboard.overallProgress",
       valueKey: "dashboard.overallProgressValue",
       detailKey: "dashboard.overallProgressDetail",
@@ -116,24 +109,40 @@ const prototypeDashboardData: DashboardPrototypeData = {
   ],
   learningActivities: [
     {
+      titleKey: "flashcards.title",
+      descriptionKey: "flashcards.activityDescription",
+      difficultyKey: "dashboard.beginner",
+      durationMinutes: 8,
+      category: "vocabulary",
+      action: "flashcards",
+    },
+    {
+      titleKey: "puzzles.title",
+      descriptionKey: "puzzles.activityDescription",
+      difficultyKey: "dashboard.beginner",
+      durationMinutes: 10,
+      category: "vocabulary",
+      action: "puzzles",
+    },
+    {
       titleKey: "dashboard.readAndMatch",
       descriptionKey: "dashboard.readAndMatchDescription",
       difficultyKey: "dashboard.beginner",
-      duration: "12 min",
+      durationMinutes: 12,
       category: "reading",
     },
     {
       titleKey: "dashboard.soundBuilder",
       descriptionKey: "dashboard.soundBuilderDescription",
       difficultyKey: "dashboard.beginner",
-      duration: "10 min",
+      durationMinutes: 10,
       category: "vocabulary",
     },
     {
       titleKey: "dashboard.sentenceSteps",
       descriptionKey: "dashboard.sentenceStepsDescription",
       difficultyKey: "dashboard.intermediate",
-      duration: "15 min",
+      durationMinutes: 15,
       category: "writing",
     },
   ],
@@ -141,17 +150,17 @@ const prototypeDashboardData: DashboardPrototypeData = {
     {
       titleKey: "dashboard.dailyReadingPractice",
       descriptionKey: "dashboard.dailyReadingPracticeDescription",
-      type: "Practice",
+      typeKey: "dashboard.resourceType.practice",
     },
     {
       titleKey: "dashboard.vocabularyWordBank",
       descriptionKey: "dashboard.vocabularyWordBankDescription",
-      type: "Word Bank",
+      typeKey: "dashboard.resourceType.wordBank",
     },
     {
       titleKey: "dashboard.writingPrompts",
       descriptionKey: "dashboard.writingPromptsDescription",
-      type: "Prompts",
+      typeKey: "dashboard.resourceType.prompts",
     },
   ],
 };
@@ -185,13 +194,18 @@ export default function Dashboard() {
     useState<AssessmentResult | null>(null);
   const [assessmentError, setAssessmentError] = useState("");
   const [learningPlan, setLearningPlan] = useState<LearningPlan | null>(null);
-  const [courseDetailsById, setCourseDetailsById] = useState<Record<number, CourseDetail>>({});
   const [isLearningPlanLoading, setIsLearningPlanLoading] = useState(false);
   const [learningPlanError, setLearningPlanError] = useState("");
   const [updatingLessonId] = useState<number | null>(null);
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [progressError, setProgressError] = useState("");
+  const [xpSummary, setXPSummary] = useState<XPSummary | null>(null);
+  const [isXPLoading, setIsXPLoading] = useState(false);
+  const [xpError, setXPError] = useState("");
+  const [badgeSummary, setBadgeSummary] = useState<BadgeSummary | null>(null);
+  const [isBadgesLoading, setIsBadgesLoading] = useState(false);
+  const [badgesError, setBadgesError] = useState("");
 
   useEffect(() => {
     applyDocumentTheme(theme);
@@ -312,8 +326,19 @@ export default function Dashboard() {
         }
 
         if (status.completed) {
-          const result = await getAssessmentResult(token);
-          setAssessmentResult(result);
+          void getAssessmentResult(token)
+            .then((result) => {
+              setAssessmentResult(result);
+            })
+            .catch((caught) => {
+              console.error(caught);
+              if (isAuthenticationError(caught)) {
+                setAssessmentError(t("profile.sessionExpired"));
+                handleUnauthorizedProfile();
+                return;
+              }
+              setAssessmentError(t("assessment.statusError"));
+            });
         }
       } catch (caught) {
         console.error(caught);
@@ -326,23 +351,6 @@ export default function Dashboard() {
       }
     },
     [handleUnauthorizedProfile, router, t],
-  );
-
-  const ensureCourseDetail = useCallback(
-    async (token: string, courseId: number) => {
-      const cachedCourse = courseDetailsById[courseId];
-      if (cachedCourse) {
-        return cachedCourse;
-      }
-
-      const course = await getCourseDetail(token, courseId);
-      setCourseDetailsById((previous) => ({
-        ...previous,
-        [courseId]: course,
-      }));
-      return course;
-    },
-    [courseDetailsById],
   );
 
   const fetchLearningPlan = useCallback(
@@ -402,6 +410,54 @@ export default function Dashboard() {
     [handleUnauthorizedProfile, mapApiError],
   );
 
+  const fetchXPSummary = useCallback(
+    async (tokenOverride?: string) => {
+      const token = tokenOverride || localStorage.getItem("access_token");
+
+      if (!token) {
+        handleUnauthorizedProfile();
+        return;
+      }
+
+      setIsXPLoading(true);
+      setXPError("");
+
+      try {
+        const summary = await getXPSummary(token);
+        setXPSummary(summary);
+      } catch {
+        setXPError(t("gamification.loadError"));
+      } finally {
+        setIsXPLoading(false);
+      }
+    },
+    [handleUnauthorizedProfile, t],
+  );
+
+  const fetchBadgeSummary = useCallback(
+    async (tokenOverride?: string) => {
+      const token = tokenOverride || localStorage.getItem("access_token");
+
+      if (!token) {
+        handleUnauthorizedProfile();
+        return;
+      }
+
+      setIsBadgesLoading(true);
+      setBadgesError("");
+
+      try {
+        const summary = await getBadgeSummary(token);
+        setBadgeSummary(summary);
+      } catch {
+        setBadgesError(t("gamification.badges.loadError"));
+      } finally {
+        setIsBadgesLoading(false);
+      }
+    },
+    [handleUnauthorizedProfile, t],
+  );
+
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
     const resolvedTheme =
@@ -425,19 +481,21 @@ export default function Dashboard() {
 
     queueMicrotask(() => {
       void fetchProfile(token)
-        .then((nextProfile) => {
+        .then(async (nextProfile) => {
           if (!nextProfile?.profile_complete) {
-            return null;
+            return nextProfile;
           }
-          return Promise.all([
-            fetchAssessmentStatus(token),
-            fetchLearningPlan(token),
-            fetchProgressRecords(token),
-          ]).then(() => null);
+
+          await fetchAssessmentStatus(token);
+          void fetchLearningPlan(token);
+          void fetchProgressRecords(token);
+          void fetchXPSummary(token);
+          void fetchBadgeSummary(token);
+          return nextProfile;
         })
         .finally(() => setIsCheckingAuth(false));
     });
-  }, [fetchAssessmentStatus, fetchLearningPlan, fetchProgressRecords, fetchProfile, router]);
+  }, [fetchAssessmentStatus, fetchBadgeSummary, fetchLearningPlan, fetchProgressRecords, fetchProfile, fetchXPSummary, router]);
 
   function beginProfileEdit() {
     if (profile) {
@@ -583,6 +641,8 @@ export default function Dashboard() {
         await fetchAssessmentStatus(token);
         await fetchLearningPlan(token);
         await fetchProgressRecords(token);
+        await fetchXPSummary(token);
+        await fetchBadgeSummary(token);
       }
     } catch {
       setProfileError(t("profile.saveError"));
@@ -613,56 +673,37 @@ export default function Dashboard() {
     return t(`assessment.level.${level}` as TranslationKey);
   }
 
-  async function routeToCourseEntry(courseId: number) {
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      handleUnauthorizedProfile();
-      return null;
-    }
-
-    try {
-      const course = await ensureCourseDetail(token, courseId);
-      const entryLessonId = resolveCourseEntryLessonId(course, progressRecords);
-      if (!entryLessonId) {
-        setLearningPlanError(t("learning.empty"));
-        return null;
-      }
-      router.push(`/lessons/${entryLessonId}`);
-      return entryLessonId;
-    } catch (caught) {
-      console.log("course entry load error", { courseId, caught });
-      setLearningPlanError(t("learning.loadError"));
-      return null;
-    }
+  function routeToLesson(lessonId: number) {
+    router.push(`/lessons/${lessonId}`);
   }
 
   function handleLessonAction(lesson: RecommendedLesson) {
-    void routeToCourseEntry(lesson.course_id);
-  }
-
-  function handleStartLearning(courseId?: number) {
     const token = localStorage.getItem("access_token");
     if (!token) {
       handleUnauthorizedProfile();
       return;
     }
 
-    const recentInProgressLessonId = resolveMostRecentInProgressLessonId(progressRecords);
-    if (!courseId && recentInProgressLessonId) {
-      router.push(`/lessons/${recentInProgressLessonId}`);
+    if (!lesson.is_unlocked) {
+      setStatusMessage(t("lesson.locked"));
       return;
     }
 
-    const fallbackCourseId =
-      courseId ??
-      learningPlan?.suggested_next_lesson?.course_id ??
-      learningPlan?.recommended_lessons[0]?.course_id;
+    routeToLesson(lesson.lesson_id);
+  }
 
-    if (!fallbackCourseId) {
+  function handleStartLearning(lesson: RecommendedLesson) {
+    const token = localStorage.getItem("access_token");
+    if (!token) {
+      handleUnauthorizedProfile();
       return;
     }
 
-    void routeToCourseEntry(fallbackCourseId);
+    if (lesson.is_unlocked) {
+      routeToLesson(lesson.lesson_id);
+      return;
+    }
+    setStatusMessage(t("lesson.locked"));
   }
 
   function handleSectionChange(section: ActiveSection) {
@@ -693,6 +734,16 @@ export default function Dashboard() {
       progressError,
       onRetryProgress: () => fetchProgressRecords(),
     };
+    const gamificationState = {
+      xpSummary,
+      isXPLoading,
+      xpError,
+      onRetryXP: () => fetchXPSummary(),
+      badgeSummary,
+      isBadgesLoading,
+      badgesError,
+      onRetryBadges: () => fetchBadgeSummary(),
+    };
     const isDark = theme === "dark";
 
     if (activeSection === "learningActivities") {
@@ -702,6 +753,8 @@ export default function Dashboard() {
           isDark={isDark}
           t={t}
           onPrototypeAction={showPrototypeMessage}
+          onFlashcards={() => router.push("/flashcards")}
+          onPuzzles={() => router.push("/puzzles")}
         />
       );
     }
@@ -763,6 +816,7 @@ export default function Dashboard() {
         isDark={isDark}
         t={t}
         onPrototypeAction={showPrototypeMessage}
+        gamification={gamificationState}
       />
     );
   }
@@ -790,7 +844,8 @@ export default function Dashboard() {
         email={email}
         profile={profile}
         currentLevel={t("common.notAvailable")}
-        streakLabel={t("dashboard.learningStreakValue")}
+        streakCount={0}
+        streakLabel={t("gamification.streak.dayPlural", { count: 0 })}
         t={t}
         onSectionChange={() => undefined}
         onThemeToggle={toggleTheme}
@@ -824,7 +879,10 @@ export default function Dashboard() {
     : learningPlan
       ? formatLevel(learningPlan.learner_proficiency_level)
       : t("common.notAvailable");
-  const streakLabel = t("dashboard.learningStreakValue");
+  const streakCount = xpSummary?.current_streak ?? 0;
+  const streakLabel = streakCount === 1
+    ? t("gamification.streak.daySingular", { count: streakCount })
+    : t("gamification.streak.dayPlural", { count: streakCount });
 
   return (
     <AppShell
@@ -834,6 +892,7 @@ export default function Dashboard() {
       email={email}
       profile={profile}
       currentLevel={currentLevel}
+      streakCount={streakCount}
       streakLabel={streakLabel}
       t={t}
       onSectionChange={handleSectionChange}

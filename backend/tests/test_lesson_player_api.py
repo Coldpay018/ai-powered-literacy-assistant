@@ -280,13 +280,8 @@ class LessonPlayerApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
 
-        self.assertEqual(response.status_code, 200, response.text)
-        data = response.json()
-        self.assertFalse(data["is_unlocked"])
-        self.assertTrue(data["locked"])
-        self.assertEqual(data["content_blocks"], [])
-        self.assertEqual(data["questions"], [])
-        self.assertEqual(data["progress"]["completion_status"], "not_started")
+        self.assertEqual(response.status_code, 423, response.text)
+        self.assertEqual(response.json()["detail"], "Lesson is locked")
 
     def test_second_lesson_unlocks_after_first_completion(self):
         token = self.token()
@@ -327,8 +322,7 @@ class LessonPlayerApiTests(unittest.TestCase):
             f"/lessons/{self.module_two_lesson_id}/player",
             headers={"Authorization": f"Bearer {token}"},
         )
-        self.assertEqual(locked_before.status_code, 200, locked_before.text)
-        self.assertFalse(locked_before.json()["is_unlocked"])
+        self.assertEqual(locked_before.status_code, 423, locked_before.text)
 
         complete_first = self.client.post(
             f"/lessons/{self.lesson_ids[0]}/quiz/submit",
@@ -341,8 +335,7 @@ class LessonPlayerApiTests(unittest.TestCase):
             f"/lessons/{self.module_two_lesson_id}/player",
             headers={"Authorization": f"Bearer {token}"},
         )
-        self.assertEqual(still_locked.status_code, 200, still_locked.text)
-        self.assertFalse(still_locked.json()["is_unlocked"])
+        self.assertEqual(still_locked.status_code, 423, still_locked.text)
 
         complete_second = self.client.post(
             f"/lessons/{self.lesson_ids[1]}/quiz/submit",
@@ -368,6 +361,16 @@ class LessonPlayerApiTests(unittest.TestCase):
                 "status": "in_progress",
                 "progress_percentage": 10,
             },
+        )
+
+        self.assertEqual(response.status_code, 423, response.text)
+
+    def test_locked_lesson_detail_is_blocked(self):
+        token = self.token("locked-detail@example.com")
+
+        response = self.client.get(
+            f"/lessons/{self.lesson_ids[1]}",
+            headers={"Authorization": f"Bearer {token}"},
         )
 
         self.assertEqual(response.status_code, 423, response.text)
@@ -423,6 +426,33 @@ class LessonPlayerApiTests(unittest.TestCase):
         )
         self.assertEqual(lesson_response.status_code, 200, lesson_response.text)
         self.assertTrue(lesson_response.json()["is_unlocked"])
+
+        locked_lesson = self.client.get(
+            f"/lessons/{self.lesson_ids[1]}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(locked_lesson.status_code, 423, locked_lesson.text)
+
+    def test_new_learner_has_exactly_first_lesson_unlocked(self):
+        token = self.token("first-only@example.com")
+        db = self.Session()
+        user = db.query(models.User).filter(models.User.email == "first-only@example.com").first()
+        course = db.query(models.Course).filter(models.Course.id == self.course_id).first()
+        from learning_content_service import is_lesson_unlocked, ordered_course_lessons, progress_status_map, repair_initial_unlock_state
+
+        lessons = ordered_course_lessons(course)
+        progress = progress_status_map(db, user.id, lessons)
+        repair_initial_unlock_state(db, user.id, lessons, progress)
+        unlocked_ids = [lesson.id for lesson in lessons if is_lesson_unlocked(lesson, lessons, progress)]
+        self.assertEqual(unlocked_ids, [self.lesson_ids[0]])
+        db.commit()
+        db.close()
+
+        first = self.client.get(
+            f"/lessons/{self.lesson_ids[0]}/player",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
 
 
 if __name__ == "__main__":

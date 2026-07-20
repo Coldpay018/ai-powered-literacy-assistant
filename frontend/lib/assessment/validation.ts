@@ -22,14 +22,19 @@ export function validateQuestion(
 
   if (
     question.question_type === "copy_typing" ||
-    question.question_type === "sentence_completion"
+    question.question_type === "sentence_completion" ||
+    question.question_type === "sentence_rearrange" ||
+    question.question_type === "reading_aloud" ||
+    question.question_type === "sentence_repetition" ||
+    question.question_type === "pronunciation" ||
+    question.question_type === "spoken_fill_blank"
   ) {
-    return answer?.text && answer.text.length <= 300
+    return answer?.text && answer.text.length <= 500
       ? ""
       : "assessment.answerTooLong";
   }
 
-  if (question.question_type === "short_response") {
+  if (question.question_type === "short_response" || question.question_type === "spoken_answer" || question.question_type === "speaking") {
     return answer?.text && answer.text.length <= 1000
       ? ""
       : "assessment.answerTooLong";

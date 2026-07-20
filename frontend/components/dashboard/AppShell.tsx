@@ -19,6 +19,7 @@ type AppShellProps = {
   email: string;
   profile: UserProfile | null;
   currentLevel: string;
+  streakCount: number;
   streakLabel: string;
   t: Translate;
   onSectionChange: (section: ActiveSection) => void;
@@ -34,6 +35,7 @@ export function AppShell({
   email,
   profile,
   currentLevel,
+  streakCount,
   streakLabel,
   t,
   onSectionChange,
@@ -56,7 +58,7 @@ export function AppShell({
         <aside className="hidden min-h-full border-r border-[var(--app-border)] app-sidebar shadow-2xl shadow-slate-950/10 lg:block">
           <div className="flex flex-col px-5 py-6">
             <BrandMark light={isDark} className="mb-8" />
-            <nav className="space-y-2" aria-label="Primary">
+            <nav className="space-y-2" aria-label={t("dashboard.primaryNav")}>
               {navItems.map((item) => {
                 const isActive = item.id === activeSection;
                 return (
@@ -89,7 +91,7 @@ export function AppShell({
                     {initials}
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-black">{profile?.full_name || email || "User"}</p>
+                    <p className="truncate text-sm font-black">{profile?.full_name || email || t("dashboard.defaultUser")}</p>
                     <p className={isDark ? "truncate text-xs font-semibold text-teal-50/62" : "truncate text-xs font-semibold text-[#667085]"}>{currentLevel}</p>
                   </div>
                 </div>
@@ -97,7 +99,7 @@ export function AppShell({
               <div className={isDark ? "rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(20,184,166,0.2),rgba(7,25,47,0.28))] p-4" : "rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface-muted)] p-4"}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-3xl font-black tracking-normal">6</p>
+                    <p className="text-3xl font-black tracking-normal">{streakCount}</p>
                     <p className={isDark ? "mt-1 text-sm font-bold text-teal-50/78" : "mt-1 text-sm font-bold text-[#667085]"}>{streakLabel}</p>
                   </div>
                   <span className={isDark ? "grid h-12 w-12 place-items-center rounded-2xl bg-[#F7D774]/20" : "grid h-12 w-12 place-items-center rounded-2xl bg-[var(--app-surface-muted)] shadow-sm"}>
@@ -135,7 +137,7 @@ export function AppShell({
                   {theme === "dark" ? t("common.light") : t("common.dark")}
                 </button>
               </div>
-              <nav className="flex max-w-full gap-2 overflow-x-auto pb-1" aria-label="Mobile primary">
+              <nav className="flex max-w-full gap-2 overflow-x-auto pb-1" aria-label={t("dashboard.mobilePrimaryNav")}>
                 {navItems.map((item) => {
                   const isActive = item.id === activeSection;
                   return (
@@ -167,8 +169,8 @@ export function AppShell({
                 <h1 className="mt-1 text-3xl font-black tracking-normal">
                   {activeSection === "dashboard" ? t("dashboard.title") : t(activeItem.labelKey)}
                 </h1>
-                <p className={isDark ? "mt-1 text-sm text-teal-50/62" : "mt-1 text-sm text-[#667085]"}>
-                  {email ? `${t("dashboard.signedInAs")} ${email}` : t("dashboard.signedInGeneric")}
+              <p className={isDark ? "mt-1 text-sm text-teal-50/62" : "mt-1 text-sm text-[#667085]"}>
+                  {email ? t("dashboard.signedInAsUser", { email }) : t("dashboard.signedInGeneric")}
                 </p>
               </div>
               <button

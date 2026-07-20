@@ -59,15 +59,46 @@ function compareLessonOrder(left: RecommendedLesson, right: RecommendedLesson) {
     left.course_order - right.course_order ||
     left.course_title.localeCompare(right.course_title) ||
     left.module_order - right.module_order ||
-    left.lesson_order - right.lesson_order ||
+    left.sequence_order - right.sequence_order ||
     left.title.localeCompare(right.title)
   );
 }
 
-function MiniTrend({ value, isDark }: { value: number; isDark: boolean }) {
+function getLessonActionLabel(lesson: RecommendedLesson, t: Translate) {
+  if (!lesson.is_unlocked) {
+    return t("lesson.locked");
+  }
+  if (lesson.completion_status === "in_progress") {
+    return t("learning.continueLesson");
+  }
+  if (lesson.completion_status === "completed") {
+    return t("learning.reviewLesson");
+  }
+  return t("learning.startLesson");
+}
+
+function formatProgressStatus(status: string, t: Translate) {
+  if (status === "completed") {
+    return t("assessment.completed");
+  }
+  if (status === "in_progress") {
+    return t("assessment.inProgress");
+  }
+  return t("assessment.notCompleted");
+}
+
+function formatDifficulty(value: string | null, t: Translate) {
+  const normalized = value?.toLowerCase();
+  if (normalized === "beginner" || normalized === "intermediate" || normalized === "advanced") {
+    return t(`assessment.level.${normalized}` as TranslationKey);
+  }
+  return value || t("common.notAvailable");
+}
+
+function MiniTrend({ value, isDark, t }: { value: number; isDark: boolean; t: Translate }) {
   const points = "0,92 50,76 100,61 150,48 200,48 250,36 300,28 350,22";
   return (
-    <svg viewBox="0 0 350 110" className="h-52 w-full" role="img" aria-label="Progress over time">
+    <svg viewBox="0 0 350 110" className="h-52 w-full" role="img" aria-label={t("dashboard.progressChartAria")}>
       <defs>
         <linearGradient id="progressArea" x1="0" x2="0" y1="0" y2="110">
           <stop stopColor="#14B8A6" stopOpacity="0.32" />
@@ -115,7 +146,7 @@ export function ProgressSection({
     : "rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-xl shadow-slate-900/6";
   const orderedLessons = [...(learningPlan?.recommended_lessons || [])].sort(compareLessonOrder);
   const nextLesson =
-    orderedLessons.find((lesson) => lesson.current_progress_status !== "completed") ||
+    orderedLessons.find((lesson) => lesson.is_unlocked && lesson.completion_status !== "completed") ||
     learningPlan?.suggested_next_lesson ||
     orderedLessons[0];
 
@@ -157,7 +188,7 @@ export function ProgressSection({
             </div>
             <div className={cardClass}>
               <h2 className="text-lg font-black tracking-normal">{t("dashboard.progressOverTime")}</h2>
-              <MiniTrend value={score} isDark={isDark} />
+              <MiniTrend value={score} isDark={isDark} t={t} />
             </div>
           </section>
 
@@ -197,15 +228,12 @@ export function ProgressSection({
                   <p className={isDark ? "mt-2 text-xs leading-5 text-teal-50/55" : "mt-2 text-xs leading-5 text-[#667085]"}>{nextLesson.recommendation_reason}</p>
                   <button
                     type="button"
-                    onClick={() => onStartLearning(nextLesson.course_id)}
+                    onClick={() => onStartLearning(nextLesson)}
                     disabled={updatingLessonId === nextLesson.lesson_id}
+                    aria-disabled={!nextLesson.is_unlocked}
                     className="group mt-5 w-full rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {nextLesson.current_progress_status === "not_started"
-                      ? t("learning.startLesson")
-                      : nextLesson.current_progress_status === "in_progress"
-                        ? t("learning.markComplete")
-                        : t("learning.completed")}{" "}
+                    {getLessonActionLabel(nextLesson, t)}{" "}
                     <span className="odyssey-button-arrow inline-block">-&gt;</span>
                   </button>
                 </>
@@ -231,20 +259,20 @@ export function ProgressSection({
                 {progressState.progressRecords.slice(0, 5).map((record) => (
                   <article key={record.lesson_id} className={isDark ? "rounded-2xl bg-white/8 p-4" : "rounded-2xl bg-[var(--app-surface-muted)] p-4"}>
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                      <h3 className="text-sm font-black">{record.lesson_title || `Lesson ${record.lesson_id}`}</h3>
-                      <span className={isDark ? "text-xs font-black text-teal-50/66" : "text-xs font-black text-[#667085]"}>{record.completion_status}</span>
+                      <h3 className="text-sm font-black">{record.lesson_title || t("dashboard.lessonFallback", { id: record.lesson_id })}</h3>
+                      <span className={isDark ? "text-xs font-black text-teal-50/66" : "text-xs font-black text-[#667085]"}>{formatProgressStatus(record.completion_status, t)}</span>
                     </div>
                     <div className={`mt-3 grid grid-cols-2 gap-3 text-xs font-bold ${isDark ? "text-teal-50/72" : "text-[#667085]"}`}>
                       <p>{t("lesson.questionsAttempted")}: {record.questions_attempted}</p>
                       <p>{t("lesson.score")}: {Math.round(record.score)}%</p>
-                      <p>{t("lesson.timeSpent")}: {record.time_spent_seconds}s</p>
-                      <p>{t("lesson.currentDifficulty")}: {record.current_difficulty || t("common.notAvailable")}</p>
+                      <p>{t("lesson.timeSpent")}: {t("dashboard.timeSpentSeconds", { seconds: record.time_spent_seconds })}</p>
+                      <p>{t("lesson.currentDifficulty")}: {formatDifficulty(record.current_difficulty, t)}</p>
                     </div>
                   </article>
                 ))}
               </div>
             ) : (
-              <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("common.notAvailable")}</p>
+              <p className={isDark ? "mt-3 text-sm text-teal-50/66" : "mt-3 text-sm text-[#667085]"}>{t("dashboard.progressUnavailable")}</p>
             )}
           </section>
         </>

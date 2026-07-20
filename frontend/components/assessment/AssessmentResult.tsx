@@ -27,6 +27,7 @@ export function AssessmentResult({
     ["assessment.overallScore", `${result.overall_score}%`],
     ["assessment.currentLevel", t(`assessment.level.${result.proficiency_level}` as TranslationKey)],
   ];
+  const skillRows = Object.entries(result.final_skill_profile || {});
 
   return (
     <section
@@ -50,6 +51,26 @@ export function AssessmentResult({
           </div>
         ))}
       </div>
+      {skillRows.length ? (
+        <div className="mt-6">
+          <p className="text-sm font-semibold">{t("assessment.finalSkillProfile")}</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {skillRows.map(([skill, value]) => (
+              <div
+                key={skill}
+                className={
+                  isDark
+                    ? "rounded-xl border border-[#2B373B] bg-[#202B2F] px-4 py-3"
+                    : "rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-muted)] px-4 py-3"
+                }
+              >
+                <p className="text-sm font-medium capitalize">{skill}</p>
+                <p className="mt-1 text-sm text-[#667085] dark:text-[#A8B3B0]">{value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <button type="button" onClick={onDashboard} className={`mt-6 ${buttonClass}`}>
         {t("assessment.goToDashboard")}
       </button>

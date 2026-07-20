@@ -1,7 +1,7 @@
 import type { AssessmentResult, AssessmentStatusResponse } from "@/lib/assessment/types";
 import type { LanguageCode } from "@/lib/i18n/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import type { LearningPlan, ProgressRecord, RecommendedLesson } from "@/lib/learning/types";
+import type { BadgeSummary, LearningPlan, ProgressRecord, RecommendedLesson, XPSummary } from "@/lib/learning/types";
 
 export type Theme = "light" | "dark";
 export type ActiveSection = "dashboard" | "learningActivities" | "progress" | "resources" | "profile";
@@ -51,13 +51,14 @@ export type DashboardPrototypeData = {
     titleKey: TranslationKey;
     descriptionKey: TranslationKey;
     difficultyKey: TranslationKey;
-    duration: string;
+    durationMinutes: number;
     category: "reading" | "writing" | "vocabulary" | "comprehension";
+    action?: "prototype" | "flashcards" | "puzzles";
   }>;
   resources: Array<{
     titleKey: TranslationKey;
     descriptionKey: TranslationKey;
-    type: string;
+    typeKey: TranslationKey;
   }>;
 };
 
@@ -73,7 +74,7 @@ export type LearningPlanState = {
   updatingLessonId: number | null;
   onRetryLearningPlan: () => void;
   onLessonAction: (lesson: RecommendedLesson) => void;
-  onStartLearning: (courseId?: number) => void;
+  onStartLearning: (lesson: RecommendedLesson) => void;
 };
 
 export type ProgressState = {
@@ -81,6 +82,17 @@ export type ProgressState = {
   isProgressLoading: boolean;
   progressError: string;
   onRetryProgress: () => void;
+};
+
+export type GamificationState = {
+  xpSummary: XPSummary | null;
+  isXPLoading: boolean;
+  xpError: string;
+  onRetryXP: () => void;
+  badgeSummary: BadgeSummary | null;
+  isBadgesLoading: boolean;
+  badgesError: string;
+  onRetryBadges: () => void;
 };
 
 export type AssessmentState = {

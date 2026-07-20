@@ -1,33 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
 import { useLanguage } from "@/components/LanguageProvider";
 import { AssessmentIntro } from "@/components/assessment/AssessmentIntro";
 import { AssessmentProgress } from "@/components/assessment/AssessmentProgress";
-import { AssessmentReview } from "@/components/assessment/AssessmentReview";
 import { AssessmentResult } from "@/components/assessment/AssessmentResult";
 import { AssessmentSection } from "@/components/assessment/AssessmentSection";
 import {
-  isAuthenticationError,
   getAssessmentResult,
   getAssessmentStatus,
-  saveAssessmentAnswers,
+  isAuthenticationError,
   startAssessment,
-  submitAssessment,
+  submitAssessmentSpokenAnswer,
+  submitAssessmentAnswer,
 } from "@/lib/assessment/api";
 import type {
-  AssessmentAnswers,
+  AssessmentAnswerValue,
   AssessmentAttempt,
   AssessmentResult as AssessmentResultType,
 } from "@/lib/assessment/types";
-import { validateQuestion } from "@/lib/assessment/validation";
-import type { TranslationKey } from "@/lib/i18n/translations";
 import { API_BASE_URL } from "@/lib/api/config";
 import { applyDocumentTheme } from "@/lib/theme";
 
 type Theme = "light" | "dark";
-type Stage = "intro" | "question" | "review" | "result";
+type Stage = "intro" | "question" | "result";
 type UserProfile = {
   comfortable_language?: string;
   learning_language?: string;
@@ -41,17 +39,14 @@ export default function InitialAssessmentPage() {
   const [token, setToken] = useState("");
   const [stage, setStage] = useState<Stage>("intro");
   const [attempt, setAttempt] = useState<AssessmentAttempt | null>(null);
-  const [answers, setAnswers] = useState<AssessmentAnswers>({});
   const [result, setResult] = useState<AssessmentResultType | null>(null);
-  const [sectionIndex, setSectionIndex] = useState(0);
-  const [questionIndex, setQuestionIndex] = useState(0);
+  const [answer, setAnswer] = useState<AssessmentAnswerValue>({});
   const [loading, setLoading] = useState(true);
   const [isStarting, setIsStarting] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [fieldError, setFieldError] = useState("");
-  const [saveMessage, setSaveMessage] = useState("");
+  const [speechFeedback, setSpeechFeedback] = useState("");
 
   const isDark = theme === "dark";
 
@@ -59,42 +54,19 @@ export default function InitialAssessmentPage() {
     applyDocumentTheme(theme);
   }, [theme]);
 
-  const loadStatus = useCallback(
-    async (authToken: string) => {
-      setLoading(true);
-      setError("");
-      try {
-        const status = await getAssessmentStatus(authToken);
-        if (!status.required && !status.completed && status.reason === "role_not_learner") {
-          router.replace("/dashboard");
-          return;
-        }
-        if (status.completed) {
-          const completedResult = await getAssessmentResult(authToken);
-          setResult(completedResult);
-          setStage("result");
-          return;
-        }
-        if (status.has_in_progress_attempt) {
-          const resumed = await startAssessment(authToken);
-          setAttempt(resumed);
-          setAnswers(resumed.answers || {});
-          setStage("question");
-        }
-      } catch (caught) {
-        console.error(caught);
-        if (isAuthenticationError(caught)) {
-          resetLanguage();
-          router.replace("/login");
-          return;
-        }
-        setError(t("assessment.loadError"));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [resetLanguage, router, t],
-  );
+  useEffect(() => {
+    if (!speechFeedback) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setSpeechFeedback("");
+    }, 2200);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [speechFeedback]);
+
+  const currentQuestion = attempt?.current_question || null;
 
   const loadProfileLanguage = useCallback(
     async (authToken: string) => {
@@ -138,6 +110,50 @@ export default function InitialAssessmentPage() {
     [resetLanguage, router, setLanguageFromValue, t],
   );
 
+  const loadAssessment = useCallback(
+    async (authToken: string) => {
+      setLoading(true);
+      setError("");
+      setSpeechFeedback("");
+      try {
+        const status = await getAssessmentStatus(authToken);
+        if (!status.required && !status.completed && status.reason === "role_not_learner") {
+          router.replace("/dashboard");
+          return;
+        }
+
+        if (status.completed) {
+          const completedResult = await getAssessmentResult(authToken);
+          setResult(completedResult);
+          setStage("result");
+          return;
+        }
+
+        const activeAttempt = await startAssessment(authToken);
+        setAttempt(activeAttempt);
+        setAnswer({});
+        setStage(activeAttempt.assessment_complete ? "result" : activeAttempt.current_question ? "question" : "intro");
+
+        if (activeAttempt.assessment_complete) {
+          const completedResult = await getAssessmentResult(authToken);
+          setResult(completedResult);
+          setStage("result");
+        }
+      } catch (caught) {
+        console.error(caught);
+        if (isAuthenticationError(caught)) {
+          resetLanguage();
+          router.replace("/login");
+          return;
+        }
+        setError(t("assessment.loadError"));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [resetLanguage, router, t],
+  );
+
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
     const resolvedTheme =
@@ -146,7 +162,6 @@ export default function InitialAssessmentPage() {
         : window.matchMedia("(prefers-color-scheme: dark)").matches
           ? "dark"
           : "light";
-
     const authToken = localStorage.getItem("access_token");
 
     queueMicrotask(() => {
@@ -165,31 +180,23 @@ export default function InitialAssessmentPage() {
     queueMicrotask(() => {
       void loadProfileLanguage(authToken).then((loadedProfile) => {
         if (loadedProfile) {
-          return loadStatus(authToken);
+          void loadAssessment(authToken);
+        } else {
+          setLoading(false);
         }
-        setLoading(false);
       });
     });
-  }, [loadProfileLanguage, loadStatus, resetLanguage, router]);
+  }, [loadAssessment, loadProfileLanguage, resetLanguage, router]);
 
-  const sections = useMemo(() => attempt?.sections || [], [attempt]);
-  const currentSection = sections[sectionIndex];
-  const currentQuestion = currentSection?.questions[questionIndex];
-  const totalQuestions = useMemo(
-    () => sections.reduce((total, section) => total + section.questions.length, 0),
-    [sections],
-  );
-  const completedBeforeCurrent = useMemo(
-    () =>
-      sections
-        .slice(0, sectionIndex)
-        .reduce((total, section) => total + section.questions.length, 0),
-    [sectionIndex, sections],
-  );
-  const overallPercent =
-    totalQuestions > 0
-      ? Math.round(((completedBeforeCurrent + questionIndex + 1) / totalQuestions) * 100)
-      : 0;
+  const totalQuestions = attempt?.total_questions || 0;
+  const answeredQuestions = attempt?.answered_questions || 0;
+  const completedSkills = attempt?.completed_skills || [];
+  const currentSkill = currentQuestion?.skill || null;
+  const currentDifficulty = currentQuestion?.difficulty_rating || null;
+  const overallPercent = totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0;
+  const currentQuestionNumber = answeredQuestions + (currentQuestion ? 1 : 0);
+  const isFinalQuestion = currentQuestionNumber > 0 && currentQuestionNumber === totalQuestions;
+  const submitLabel = isFinalQuestion ? t("assessment.submit") : t("assessment.submitAnswer");
 
   const pageClass = isDark
     ? "min-h-screen bg-[#0F1517] text-[#F4F7F6]"
@@ -201,11 +208,8 @@ export default function InitialAssessmentPage() {
   const buttonClass = isDark
     ? "rounded-xl bg-[#63B3A7] px-5 py-3 text-sm font-semibold text-[#0F1517] transition hover:bg-[#79C7BC] disabled:opacity-60"
     : "rounded-xl bg-[#2F7D73] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#25675F] disabled:opacity-60";
-  const secondaryButtonClass = isDark
-    ? "rounded-xl border border-[#2B373B] px-5 py-3 text-sm font-semibold text-[#F4F7F6] transition hover:bg-[#202B2F]"
-    : "rounded-xl border border-[var(--app-border)] px-5 py-3 text-sm font-semibold text-[#172033] transition hover:bg-[var(--app-surface-muted)]";
 
-  async function startOrResumeAssessment() {
+  const startOrResumeAssessment = async () => {
     if (!token) {
       router.replace("/login");
       return;
@@ -213,120 +217,155 @@ export default function InitialAssessmentPage() {
 
     setIsStarting(true);
     setError("");
+    setSpeechFeedback("");
     try {
       const started = await startAssessment(token);
       setAttempt(started);
-      setAnswers(started.answers || {});
-      setStage("question");
-      } catch (caught) {
-        console.error(caught);
-        if (isAuthenticationError(caught)) {
-          resetLanguage();
-          router.replace("/login");
-          return;
-        }
-        setError(t("assessment.startError"));
-      } finally {
-      setIsStarting(false);
-    }
-  }
-
-  async function saveProgress(nextAnswers: AssessmentAnswers = answers) {
-    if (!attempt || !token) {
-      return false;
-    }
-    setIsSaving(true);
-    setSaveMessage(t("assessment.saving"));
-    try {
-      await saveAssessmentAnswers(token, attempt.attempt_id, nextAnswers);
-      setSaveMessage(t("assessment.saved"));
-      return true;
+      setAnswer({});
+      if (started.assessment_complete) {
+        const completedResult = await getAssessmentResult(token);
+        setResult(completedResult);
+        setStage("result");
+        return;
+      }
+      if (started.current_question) {
+        setStage("question");
+      } else {
+        setError(t("assessment.noQuestionsAvailable"));
+      }
     } catch (caught) {
       console.error(caught);
-      setSaveMessage("");
-      setError(t("assessment.saveError"));
-      return false;
+      if (isAuthenticationError(caught)) {
+        resetLanguage();
+        router.replace("/login");
+        return;
+      }
+      setError(t("assessment.startError"));
     } finally {
-      setIsSaving(false);
+      setIsStarting(false);
     }
-  }
+  };
 
-  async function goNext() {
-    if (!currentQuestion || !currentSection) {
+  const submitAnswer = async () => {
+    if (!attempt || !currentQuestion || !token) {
       return;
     }
-    const validationKey = validateQuestion(
-      currentQuestion,
-      answers[currentQuestion.attempt_question_id],
-    );
+
+    const validationKey = validateCurrentAnswer(currentQuestion, answer);
     if (validationKey) {
       setFieldError(t(validationKey));
       return;
     }
-    setFieldError("");
-    const saved = await saveProgress();
-    if (!saved) {
-      return;
-    }
-    if (questionIndex < currentSection.questions.length - 1) {
-      setQuestionIndex(questionIndex + 1);
-      return;
-    }
-    if (sectionIndex < sections.length - 1) {
-      setSectionIndex(sectionIndex + 1);
-      setQuestionIndex(0);
-      return;
-    }
-    setStage("review");
-  }
 
-  async function goPrevious() {
     setFieldError("");
-    await saveProgress();
-    if (questionIndex > 0) {
-      setQuestionIndex(questionIndex - 1);
-      return;
-    }
-    if (sectionIndex > 0) {
-      const previousSection = sections[sectionIndex - 1];
-      setSectionIndex(sectionIndex - 1);
-      setQuestionIndex(previousSection.questions.length - 1);
-    }
-  }
-
-  async function submit() {
-    if (!attempt || !token) {
-      return;
-    }
-    const unanswered = sections.some((section) =>
-      section.questions.some((question) =>
-        validateQuestion(question, answers[question.attempt_question_id]),
-      ),
-    );
-    if (unanswered) {
-      setError(t("assessment.requiredAnswer"));
-      return;
-    }
-    if (!window.confirm(t("assessment.confirmSubmit"))) {
-      return;
-    }
     setIsSubmitting(true);
     setError("");
+    setSpeechFeedback("");
+
     try {
-      const saved = await saveProgress();
-      if (!saved) {
+      const submitted = await submitAssessmentAnswer(
+        token,
+        attempt.attempt_id,
+        currentQuestion.attempt_question_id,
+        answer,
+      );
+
+      const nextAttempt: AssessmentAttempt = {
+        ...attempt,
+        answered_questions: submitted.answered_questions,
+        total_questions: submitted.total_questions,
+        completed_skills: submitted.completed_skills,
+        current_question: submitted.next_question,
+        assessment_complete: submitted.assessment_complete,
+        final_skill_profile: submitted.final_skill_profile,
+      };
+      setAttempt(nextAttempt);
+
+      if (submitted.result) {
+        setResult(submitted.result);
+        setStage("result");
         return;
       }
-      const submitted = await submitAssessment(token, attempt.attempt_id);
-      setResult(submitted);
+
+      if (submitted.next_question) {
+        setAnswer({});
+        setStage("question");
+        return;
+      }
+
+      const refreshed = await getAssessmentResult(token);
+      setResult(refreshed);
       setStage("result");
     } catch (caught) {
       console.error(caught);
-      setError(t("assessment.submitError"));
+      if (isAuthenticationError(caught)) {
+        resetLanguage();
+        router.replace("/login");
+        return;
+      }
+      setError(t("assessment.answerError"));
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
+
+  const submitSpokenAnswer = async (recognizedText: string) => {
+    if (!attempt || !currentQuestion || !token) {
+      return;
+    }
+
+    setFieldError("");
+    setIsSubmitting(true);
+    setError("");
+    setSpeechFeedback("");
+
+    try {
+      const submitted = await submitAssessmentSpokenAnswer(
+        token,
+        attempt.attempt_id,
+        currentQuestion.attempt_question_id,
+        recognizedText,
+      );
+
+      const nextAttempt: AssessmentAttempt = {
+        ...attempt,
+        answered_questions: submitted.answered_questions,
+        total_questions: submitted.total_questions,
+        completed_skills: submitted.completed_skills,
+        current_question: submitted.next_question,
+        assessment_complete: submitted.assessment_complete,
+        final_skill_profile: submitted.final_skill_profile,
+      };
+      setAttempt(nextAttempt);
+      setSpeechFeedback(submitted.feedback || "");
+
+      if (submitted.result) {
+        setResult(submitted.result);
+        setStage("result");
+        return;
+      }
+
+      if (submitted.next_question) {
+        setAnswer({});
+        setStage("question");
+        return;
+      }
+
+      const refreshed = await getAssessmentResult(token);
+      setResult(refreshed);
+      setStage("result");
+    } catch (caught) {
+      console.error(caught);
+      if (isAuthenticationError(caught)) {
+        resetLanguage();
+        router.replace("/login");
+        return;
+      }
+      setError(t("assessment.answerError"));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (loading) {
     return <main className={`${pageClass} flex items-center justify-center p-6`}>{t("common.loading")}</main>;
@@ -342,84 +381,87 @@ export default function InitialAssessmentPage() {
         ) : null}
 
         {stage === "intro" ? (
-          <AssessmentIntro
-            onStart={startOrResumeAssessment}
-            isStarting={isStarting}
-            isDark={isDark}
-            t={t}
-          />
+          <AssessmentIntro onStart={startOrResumeAssessment} isStarting={isStarting} isDark={isDark} t={t} />
         ) : null}
 
-        {stage === "question" && attempt && currentSection && currentQuestion ? (
+        {stage === "question" && attempt && currentQuestion ? (
           <section className={`space-y-5 rounded-2xl border p-5 shadow-xl ${panelClass}`}>
             <AssessmentProgress
-              sectionLabel={t(`assessment.${currentSection.section}` as TranslationKey)}
-              sectionIndex={sectionIndex}
-              questionIndex={questionIndex}
-              sectionTotal={currentSection.questions.length}
+              answeredQuestions={answeredQuestions}
+              totalQuestions={totalQuestions}
+              completedSkills={completedSkills}
+              currentSkill={currentSkill}
+              currentDifficulty={currentDifficulty}
               overallPercent={overallPercent}
               t={t}
               isDark={isDark}
             />
             <AssessmentSection
+              key={currentQuestion.attempt_question_id}
               question={currentQuestion}
-              answer={answers[currentQuestion.attempt_question_id]}
+              answer={answer}
               error={fieldError}
-              onChange={(answer) => {
-                setAnswers((previous) => ({
-                  ...previous,
-                  [currentQuestion.attempt_question_id]: answer,
-                }));
+              submitLabel={submitLabel}
+              ttsLanguage={currentQuestion.learning_language || currentQuestion.speech_language}
+              feedback={speechFeedback}
+              onChange={(nextAnswer) => {
+                setAnswer(nextAnswer);
                 setFieldError("");
-                setSaveMessage("");
               }}
+              onSubmit={submitAnswer}
+              onSubmitRecognizedText={submitSpokenAnswer}
+              isSubmitting={isSubmitting}
               t={t}
               isDark={isDark}
             />
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className={`text-sm ${secondaryTextClass}`}>
-                {isSaving ? t("assessment.saving") : saveMessage}
-              </p>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <button type="button" onClick={goPrevious} className={secondaryButtonClass}>
-                  {t("assessment.previous")}
-                </button>
-                <button type="button" onClick={goNext} disabled={isSaving} className={buttonClass}>
-                  {sectionIndex === sections.length - 1 &&
-                  questionIndex === currentSection.questions.length - 1
-                    ? t("assessment.review")
-                    : t("assessment.next")}
+            {currentQuestion.input_mode !== "letter_tiles" && currentQuestion.input_mode !== "word_tiles" ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                <button type="button" onClick={submitAnswer} disabled={isSubmitting} className={buttonClass}>
+                  {isSubmitting ? t("assessment.submitting") : submitLabel}
                 </button>
               </div>
-            </div>
+            ) : null}
           </section>
         ) : null}
 
-        {stage === "review" && attempt ? (
-          <AssessmentReview
-            sections={attempt.sections}
-            answers={answers}
-            onGoToSection={(nextSectionIndex) => {
-              setSectionIndex(nextSectionIndex);
-              setQuestionIndex(0);
-              setStage("question");
-            }}
-            onSubmit={submit}
-            isSubmitting={isSubmitting}
-            isDark={isDark}
-            t={t}
-          />
+        {stage === "result" && result ? (
+          <AssessmentResult result={result} onDashboard={() => router.push("/dashboard")} isDark={isDark} t={t} />
         ) : null}
 
-        {stage === "result" && result ? (
-          <AssessmentResult
-            result={result}
-            onDashboard={() => router.replace("/dashboard")}
-            isDark={isDark}
-            t={t}
-          />
+        {stage === "question" && attempt && currentQuestion ? (
+          <p className={`text-sm ${secondaryTextClass}`}>
+            {t("assessment.questionOf", { current: currentQuestionNumber, total: totalQuestions })}
+          </p>
         ) : null}
+
       </div>
     </main>
   );
+}
+
+function validateCurrentAnswer(
+  question: AssessmentAttempt["current_question"],
+  answer: AssessmentAnswerValue,
+) {
+  if (!question) {
+    return "";
+  }
+
+  if (question.question_type === "reading_mcq" || question.question_type === "mcq") {
+    return answer.selected_option_id ? "" : "assessment.requiredAnswer";
+  }
+
+  if (question.question_type === "short_response") {
+    return answer.text && answer.text.length <= 1000 ? "" : "assessment.answerTooLong";
+  }
+
+  if (
+    question.question_type === "copy_typing" ||
+    question.question_type === "sentence_completion" ||
+    question.question_type === "sentence_rearrange"
+  ) {
+    return answer.text && answer.text.length <= 500 ? "" : "assessment.answerTooLong";
+  }
+
+  return answer.text?.trim() ? "" : "assessment.requiredAnswer";
 }

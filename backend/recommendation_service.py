@@ -9,6 +9,13 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
+from learning_content_service import (
+    first_unlocked_lesson,
+    is_lesson_unlocked,
+    ordered_course_lessons,
+    progress_status_map,
+    repair_initial_unlock_state,
+)
 
 
 EmbeddingFn = Callable[[list[str]], list[list[float]]]
@@ -153,10 +160,11 @@ def _reason(lesson: models.Lesson, skill_profile: SkillProfile, result: models.A
 def _serialize_recommendation(
     recommendation: models.LessonRecommendation,
     progress: models.LearnerProgress | None,
+    is_unlocked: bool,
 ) -> dict:
     lesson = recommendation.lesson
     course = lesson.course
-    module_order = lesson.module.sequence_order if lesson.module else 0
+    module = lesson.module
     return {
         "lesson_id": lesson.id,
         "title": lesson.title,
@@ -167,13 +175,78 @@ def _serialize_recommendation(
         "course_id": lesson.course_id,
         "course_title": course.title if course else "",
         "course_order": COURSE_ORDER.get(course.proficiency_level if course else lesson.proficiency_level, 99),
-        "module_order": module_order,
+        "module_id": module.id if module else None,
+        "module_order": module.sequence_order if module else 0,
+        "sequence_order": lesson.sequence_order,
         "lesson_order": lesson.sequence_order,
         "estimated_duration_minutes": lesson.estimated_duration_minutes,
         "recommendation_score": round(float(recommendation.recommendation_score), 4),
         "recommendation_reason": recommendation.recommendation_reason,
         "current_progress_status": progress.status if progress else "not_started",
+        "completion_status": progress.status if progress else "not_started",
+        "is_unlocked": is_unlocked,
     }
+
+
+def _serialize_starting_lesson(
+    lesson: models.Lesson,
+    progress: models.LearnerProgress | None,
+) -> dict:
+    course = lesson.course
+    module = lesson.module
+    return {
+        "lesson_id": lesson.id,
+        "title": lesson.title,
+        "description": lesson.description,
+        "skill_type": lesson.skill_type,
+        "proficiency_level": lesson.proficiency_level,
+        "language": lesson.language,
+        "course_id": lesson.course_id,
+        "course_title": course.title if course else "",
+        "course_order": COURSE_ORDER.get(course.proficiency_level if course else lesson.proficiency_level, 99),
+        "module_id": module.id if module else None,
+        "module_order": module.sequence_order if module else 0,
+        "sequence_order": lesson.sequence_order,
+        "lesson_order": lesson.sequence_order,
+        "estimated_duration_minutes": lesson.estimated_duration_minutes,
+        "recommendation_score": 1.0,
+        "recommendation_reason": "Start here: this is your first unlocked lesson in the learning path.",
+        "current_progress_status": progress.status if progress else "not_started",
+        "completion_status": progress.status if progress else "not_started",
+        "is_unlocked": True,
+    }
+
+
+def _with_accessible_starting_lesson(
+    db: Session,
+    user: models.User,
+    recommendations: list[dict],
+    ordered_courses: dict[int, list[models.Lesson]],
+) -> list[dict]:
+    if not recommendations:
+        return recommendations
+
+    recommended_course_ids = [item["course_id"] for item in recommendations]
+    for course_id in recommended_course_ids:
+        ordered_lessons = ordered_courses.get(course_id)
+        if not ordered_lessons:
+            continue
+        progress = progress_status_map(db, user.id, ordered_lessons)
+        repair_initial_unlock_state(db, user.id, ordered_lessons, progress)
+        starting_lesson = first_unlocked_lesson(ordered_lessons, progress)
+        if not starting_lesson:
+            continue
+        db.commit()
+        existing_start = next((item for item in recommendations if item["lesson_id"] == starting_lesson.id), None)
+        if existing_start:
+            existing_start["is_unlocked"] = True
+            existing_start["current_progress_status"] = progress.get(starting_lesson.id).status if progress.get(starting_lesson.id) else "not_started"
+            existing_start["completion_status"] = existing_start["current_progress_status"]
+            return [existing_start, *[item for item in recommendations if item["lesson_id"] != starting_lesson.id]]
+        starting_progress = progress.get(starting_lesson.id)
+        starting_item = _serialize_starting_lesson(starting_lesson, starting_progress)
+        return [starting_item, *[item for item in recommendations if item["lesson_id"] != starting_lesson.id]]
+    return recommendations
 
 
 def current_recommendations(db: Session, user: models.User) -> list[dict]:
@@ -185,7 +258,25 @@ def current_recommendations(db: Session, user: models.User) -> list[dict]:
         .all()
     )
     progress = _progress_by_lesson(db, user.id)
-    return [_serialize_recommendation(item, progress.get(item.lesson_id)) for item in recommendations]
+    ordered_courses: dict[int, list[models.Lesson]] = {}
+    serialized: list[dict] = []
+    seen_lesson_ids: set[int] = set()
+    for item in recommendations:
+        if item.lesson_id in seen_lesson_ids or item.lesson is None:
+            continue
+        lesson = item.lesson
+        if lesson.course_id not in ordered_courses:
+            ordered_courses[lesson.course_id] = ordered_course_lessons(lesson.course)
+        course_lessons = ordered_courses[lesson.course_id]
+        course_progress = progress_status_map(db, user.id, course_lessons)
+        repair_initial_unlock_state(db, user.id, course_lessons, course_progress)
+        progress.update(course_progress)
+        unlocked = is_lesson_unlocked(lesson, course_lessons, progress)
+        serialized.append(_serialize_recommendation(item, progress.get(item.lesson_id), unlocked))
+        seen_lesson_ids.add(item.lesson_id)
+    if ordered_courses:
+        db.commit()
+    return _with_accessible_starting_lesson(db, user, serialized, ordered_courses)
 
 
 def generate_recommendations(db: Session, user: models.User, limit: int = 6) -> list[dict]:
@@ -257,7 +348,11 @@ def learning_plan(db: Session, user: models.User) -> dict:
     recommended_ids = {item["lesson_id"] for item in recommendations}
     completed = sum(1 for lesson_id in recommended_ids if progress_rows.get(lesson_id) and progress_rows[lesson_id].status == "completed")
     in_progress = sum(1 for lesson_id in recommended_ids if progress_rows.get(lesson_id) and progress_rows[lesson_id].status == "in_progress")
-    suggested = next((item for item in recommendations if item["current_progress_status"] != "completed"), None)
+    suggested = (
+        next((item for item in recommendations if item["is_unlocked"] and item["current_progress_status"] != "completed"), None)
+        or next((item for item in recommendations if item["is_unlocked"]), None)
+        or next((item for item in recommendations if item["current_progress_status"] != "completed"), None)
+    )
     return {
         "learner_proficiency_level": result.proficiency_level,
         "reading_score": result.reading_score,

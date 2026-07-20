@@ -9,9 +9,12 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
+from gamification_service import award_initial_assessment_xp
+from assessment_question_utils import normalize_sentence_text
 from adaptive_difficulty_service import evaluate_difficulty
 from language_utils import normalize_language
 from question_taxonomy import (
+    QUESTION_SKILLS,
     clamp_difficulty,
     normalize_age_group,
     normalize_difficulty_value,
@@ -20,6 +23,7 @@ from question_taxonomy import (
     normalize_question_skill,
     normalize_question_type,
 )
+from question_difficulty_service import build_starting_difficulty_profile
 from seed_assessment import ASSESSMENT_VERSION
 
 
@@ -329,7 +333,7 @@ def _validate_answer(question: models.AssessmentQuestion, attempt_question: mode
         text = answer.get("text")
         if not isinstance(text, str) or not text.strip():
             raise HTTPException(status_code=422, detail="Required answer missing")
-        max_len = 1000 if question.question_type == "short_response" else 300
+        max_len = 1000 if question.question_type == "short_response" else 500
         if len(text) > max_len:
             raise HTTPException(status_code=422, detail="Invalid answer")
 
@@ -421,6 +425,30 @@ def _score_completion(answer: str, correct: dict, marks: int):
     return 0, {"match": "none", "normalized_answer": normalized}
 
 
+def _score_sentence_rearrange(answer: str, correct: dict, marks: int):
+    reference = correct.get("reference_text", "")
+    case_sensitive = bool(correct.get("case_sensitive", False))
+    allow_terminal_punctuation = bool(correct.get("allow_terminal_punctuation", True))
+    normalized_answer = normalize_sentence_text(
+        answer,
+        case_sensitive=case_sensitive,
+        allow_terminal_punctuation=allow_terminal_punctuation,
+    )
+    normalized_reference = normalize_sentence_text(
+        reference,
+        case_sensitive=case_sensitive,
+        allow_terminal_punctuation=allow_terminal_punctuation,
+    )
+    is_correct = bool(normalized_answer) and normalized_answer == normalized_reference
+    return marks if is_correct else 0, is_correct, {
+        "match": "exact" if is_correct else "none",
+        "normalized_answer": normalized_answer,
+        "normalized_reference": normalized_reference,
+        "case_sensitive": case_sensitive,
+        "allow_terminal_punctuation": allow_terminal_punctuation,
+    }
+
+
 def _score_short(answer: str, correct: dict, marks: int):
     normalized = normalize_text(answer)
     lowered = normalized.lower()
@@ -454,6 +482,16 @@ def _score_answer(question, attempt_question, answer_row):
     if question.question_type == "sentence_completion":
         marks, details = _score_completion(answer.get("text", ""), correct, attempt_question.maximum_marks)
         return marks, None, details
+    if question.question_type == "sentence_rearrange":
+        marks, is_correct, details = _score_sentence_rearrange(answer.get("text", ""), correct, attempt_question.maximum_marks)
+        return marks, is_correct, details
+    if question.question_type in {"spoken_answer", "speaking", "spoken_fill_blank"}:
+        marks, details = _score_completion(answer.get("text", ""), correct, attempt_question.maximum_marks)
+        return marks, None, details
+    if question.question_type in {"reading_aloud", "sentence_repetition", "pronunciation"}:
+        reference = correct.get("reference_text", "") or ""
+        marks, details = _score_copy(answer.get("text", ""), reference, attempt_question.maximum_marks)
+        return marks, None, details
     marks, details = _score_short(answer.get("text", ""), correct, attempt_question.maximum_marks)
     return marks, None, details
 
@@ -476,6 +514,62 @@ def classify_proficiency(overall, reading, typing):
     if overall >= 40 and (reading < 25 or typing < 25):
         level = "beginner"
     return level
+
+
+def _performance_level(accuracy: float | None) -> int | None:
+    if accuracy is None:
+        return None
+    if accuracy >= 0.9:
+        return 5
+    if accuracy >= 0.75:
+        return 4
+    if accuracy >= 0.55:
+        return 3
+    if accuracy >= 0.35:
+        return 2
+    return 1
+
+
+def build_final_skill_profile(db: Session, user: models.User, attempt_id: int) -> dict[str, int]:
+    starting_profile = build_starting_difficulty_profile(db, user)
+    starting_difficulties = starting_profile["skill_difficulties"]
+    answer_rows = (
+        db.query(models.AssessmentAnswer, models.AssessmentQuestion)
+        .join(models.AssessmentQuestion, models.AssessmentAnswer.question_id == models.AssessmentQuestion.id)
+        .filter(models.AssessmentAnswer.attempt_id == attempt_id)
+        .all()
+    )
+    adaptive_states = {
+        state.skill: state
+        for state in db.query(models.LearnerSkillDifficulty)
+        .filter(models.LearnerSkillDifficulty.user_id == user.id)
+        .all()
+    }
+    stats = {skill: {"answered": 0, "correct": 0} for skill in QUESTION_SKILLS}
+    for answer, question in answer_rows:
+        try:
+            skill = normalize_question_skill(question.skill or question.skill_tag)
+        except ValueError:
+            continue
+        if skill not in stats:
+            continue
+        stats[skill]["answered"] += 1
+        if answer.is_correct is True:
+            stats[skill]["correct"] += 1
+
+    final_profile: dict[str, int] = {}
+    for skill in QUESTION_SKILLS:
+        base_difficulty = clamp_difficulty(
+            adaptive_states.get(skill).current_difficulty if adaptive_states.get(skill) else starting_difficulties.get(skill, 2)
+        )
+        answered = stats[skill]["answered"]
+        if answered <= 0:
+            final_profile[skill] = base_difficulty
+            continue
+        accuracy = stats[skill]["correct"] / answered if answered else None
+        performance_level = _performance_level(accuracy) or base_difficulty
+        final_profile[skill] = clamp_difficulty(round((base_difficulty + performance_level) / 2))
+    return final_profile
 
 
 def submit_attempt(db: Session, user: models.User, attempt_id: int):
@@ -539,6 +633,7 @@ def submit_attempt(db: Session, user: models.User, attempt_id: int):
     overall_score = round((reading_score * 0.35) + (typing_score * 0.35) + (mcq_score * 0.30), 2)
     level = classify_proficiency(overall_score, reading_score, typing_score)
     now = datetime.now(timezone.utc)
+    final_skill_profile = build_final_skill_profile(db, user, attempt.id)
     attempt.status = "evaluated"
     attempt.submitted_at = now
     attempt.evaluated_at = now
@@ -552,9 +647,11 @@ def submit_attempt(db: Session, user: models.User, attempt_id: int):
         mcq_score=mcq_score,
         overall_score=overall_score,
         proficiency_level=level,
+        final_skill_profile_json=_dumps(final_skill_profile),
         completed_at=now,
     )
     db.add(result)
+    award_initial_assessment_xp(db, user_id=user.id)
     db.commit()
     db.refresh(result)
     return result_response(result, difficulty_adjustments=difficulty_adjustments)
@@ -570,6 +667,7 @@ def result_response(result: models.AssessmentResult, difficulty_adjustments: lis
         "mcq_score": result.mcq_score,
         "overall_score": result.overall_score,
         "proficiency_level": result.proficiency_level,
+        "final_skill_profile": _loads(result.final_skill_profile_json, {}),
         "difficulty_adjustments": difficulty_adjustments or [],
     }
 
@@ -586,3 +684,132 @@ def get_result(db: Session, user: models.User):
     if not result:
         raise HTTPException(status_code=404, detail="Result not found")
     return result_response(result)
+
+
+def _normalize_spoken_text(
+    value: str,
+    *,
+    case_sensitive: bool = False,
+    allow_terminal_punctuation: bool = True,
+):
+    return normalize_sentence_text(
+        value,
+        case_sensitive=case_sensitive,
+        allow_terminal_punctuation=allow_terminal_punctuation,
+    )
+
+
+def _score_copy(
+    answer: str,
+    reference: str,
+    marks: int,
+    *,
+    case_sensitive: bool = False,
+    allow_terminal_punctuation: bool = True,
+):
+    normalized_answer = _normalize_spoken_text(
+        answer,
+        case_sensitive=case_sensitive,
+        allow_terminal_punctuation=allow_terminal_punctuation,
+    )
+    normalized_reference = _normalize_spoken_text(
+        reference,
+        case_sensitive=case_sensitive,
+        allow_terminal_punctuation=allow_terminal_punctuation,
+    )
+    if not normalized_answer and not normalized_reference:
+        similarity = 1.0
+    elif not normalized_answer or not normalized_reference:
+        similarity = 0.0
+    else:
+        similarity = SequenceMatcher(None, normalized_answer, normalized_reference).ratio()
+    if similarity >= 0.9:
+        awarded = marks
+    elif similarity >= 0.75:
+        awarded = marks * 0.75
+    elif similarity >= 0.5:
+        awarded = marks * 0.5
+    elif similarity >= 0.25:
+        awarded = marks * 0.25
+    else:
+        awarded = 0
+    return awarded, {"similarity": round(similarity * 100, 2), "normalized_answer": normalized_answer}
+
+
+def _score_completion(
+    answer: str,
+    correct: dict,
+    marks: int,
+    *,
+    case_sensitive: bool = False,
+    allow_terminal_punctuation: bool = True,
+):
+    normalized = _normalize_spoken_text(
+        answer,
+        case_sensitive=case_sensitive,
+        allow_terminal_punctuation=allow_terminal_punctuation,
+    )
+    accepted = [
+        _normalize_spoken_text(
+            item,
+            case_sensitive=case_sensitive,
+            allow_terminal_punctuation=allow_terminal_punctuation,
+        )
+        for item in correct.get("accepted_answers", [])
+        if isinstance(item, str)
+    ]
+    keywords = [
+        _normalize_spoken_text(
+            item,
+            case_sensitive=case_sensitive,
+            allow_terminal_punctuation=allow_terminal_punctuation,
+        )
+        for item in correct.get("required_keywords", [])
+        if isinstance(item, str)
+    ]
+    if normalized in accepted:
+        return marks, {"match": "exact", "normalized_answer": normalized}
+    matched = [keyword for keyword in keywords if keyword and keyword in normalized]
+    if keywords and len(matched) == len(keywords):
+        return marks * 0.75, {"match": "all_keywords", "matched_keywords": matched}
+    if matched:
+        return marks * (0.5 * len(matched) / len(keywords)), {"match": "partial_keywords", "matched_keywords": matched}
+    return 0, {"match": "none", "normalized_answer": normalized}
+
+
+def _score_answer(question, attempt_question, answer_row):
+    answer = _loads(answer_row.answer_json, {})
+    correct = _loads(question.correct_answer_json, {})
+    if question.question_type in {"reading_mcq", "mcq"}:
+        is_correct = answer.get("selected_option_id") == correct.get("correct_option_id")
+        return (attempt_question.maximum_marks if is_correct else 0), is_correct, {"selected_option_id": answer.get("selected_option_id")}
+    if question.question_type == "copy_typing":
+        marks, details = _score_copy(answer.get("text", ""), correct.get("reference_text", ""), attempt_question.maximum_marks)
+        return marks, None, details
+    if question.question_type == "sentence_completion":
+        marks, details = _score_completion(answer.get("text", ""), correct, attempt_question.maximum_marks)
+        return marks, None, details
+    if question.question_type == "sentence_rearrange":
+        marks, is_correct, details = _score_sentence_rearrange(answer.get("text", ""), correct, attempt_question.maximum_marks)
+        return marks, is_correct, details
+    if question.question_type in {"spoken_answer", "speaking", "spoken_fill_blank"}:
+        marks, details = _score_completion(
+            answer.get("text", ""),
+            correct,
+            attempt_question.maximum_marks,
+            case_sensitive=bool(correct.get("case_sensitive", False)),
+            allow_terminal_punctuation=bool(correct.get("allow_terminal_punctuation", True)),
+        )
+        return marks, None, details
+    if question.question_type in {"reading_aloud", "sentence_repetition", "pronunciation"}:
+        reference = correct.get("reference_text", "") or ""
+        marks, details = _score_copy(
+            answer.get("text", ""),
+            reference,
+            attempt_question.maximum_marks,
+            case_sensitive=bool(correct.get("case_sensitive", False)),
+            allow_terminal_punctuation=bool(correct.get("allow_terminal_punctuation", True)),
+        )
+        return marks, None, details
+    marks, details = _score_short(answer.get("text", ""), correct, attempt_question.maximum_marks)
+    return marks, None, details

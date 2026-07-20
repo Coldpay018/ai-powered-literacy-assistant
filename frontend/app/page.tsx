@@ -203,6 +203,8 @@ export default function Home() {
   function handleLanguageChange(event: ChangeEvent<HTMLSelectElement>) {
     const selectedLanguage = event.target.value as LanguageCode;
 
+    setLanguageFromValue(selectedLanguage);
+
     setRegisterForm((previous) => ({
       ...previous,
       comfortable_language: selectedLanguage,

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import relationship, validates
 
 from database import Base
@@ -17,6 +17,8 @@ from question_taxonomy import (
 SKILL_VALUES = ("reading", "writing", "comprehension")
 DIFFICULTY_LEVEL_VALUES = ("beginner", "intermediate", "advanced")
 LESSON_STATUS_VALUES = ("not_started", "in_progress", "completed")
+LEARNING_PLAN_STATUS_VALUES = ("pending", "generating", "ready", "failed")
+GENERATED_LESSON_CONTENT_STATUS_VALUES = ("not_generated", "generating", "ready", "failed")
 CONTENT_TYPE_VALUES = (
     "text",
     "image",
@@ -31,6 +33,7 @@ CONTENT_TYPE_VALUES = (
     "dictation",
     "quiz",
 )
+PUZZLE_TYPE_VALUES = ("jumbled_word", "matching")
 LESSON_QUESTION_TYPE_VALUES = (
     "mcq",
     "true_false",
@@ -64,6 +67,16 @@ class User(Base):
 
     lesson_attempts = relationship("LessonAttempt", back_populates="user")
     lesson_progress_records = relationship("LearnerProgress", back_populates="user")
+    learning_plans = relationship("LearningPlan", back_populates="user")
+    xp_transactions = relationship("XPTransaction", back_populates="user")
+    gamification_summary = relationship("GamificationSummary", back_populates="user", uselist=False)
+    streak_summary = relationship("StreakSummary", back_populates="user", uselist=False)
+    daily_streak_activities = relationship("DailyStreakActivity", back_populates="user")
+    earned_badges = relationship("UserBadge", back_populates="user")
+    flashcard_decks = relationship("FlashcardDeck", back_populates="user")
+    flashcard_progress_records = relationship("FlashcardProgress", back_populates="user")
+    puzzle_sets = relationship("PuzzleSet", back_populates="user")
+    puzzle_attempts = relationship("PuzzleAttempt", back_populates="user")
 
     @property
     def profile_complete(self) -> bool:
@@ -183,6 +196,7 @@ class AssessmentAttemptQuestion(Base):
     section = Column(String(30), nullable=False)
     display_order = Column(Integer, nullable=False)
     shuffled_options_json = Column(Text, nullable=True)
+    shuffled_tiles_json = Column(Text, nullable=True)
     maximum_marks = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
@@ -206,11 +220,13 @@ class AssessmentAnswer(Base):
     maximum_marks = Column(Integer, nullable=False)
     scoring_details_json = Column(Text, nullable=True)
     feedback = Column(Text, nullable=True)
+    submission_hash = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("attempt_id", "attempt_question_id", name="uq_answer_attempt_question"),
+        Index("ix_assessment_answers_submission_hash", "attempt_id", "attempt_question_id", "submission_hash"),
     )
 
 
@@ -226,6 +242,7 @@ class AssessmentResult(Base):
     mcq_score = Column(Float, nullable=False)
     overall_score = Column(Float, nullable=False)
     proficiency_level = Column(String(30), nullable=False)
+    final_skill_profile_json = Column(Text, nullable=True)
     completed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
@@ -333,6 +350,8 @@ class Lesson(Base):
     attempts = relationship("LessonAttempt", back_populates="lesson")
     progress_records = relationship("LearnerProgress", back_populates="lesson")
     recommendations = relationship("LessonRecommendation", back_populates="lesson")
+    flashcard_decks = relationship("FlashcardDeck", back_populates="lesson")
+    puzzle_sets = relationship("PuzzleSet", back_populates="lesson")
 
     __table_args__ = (
         CheckConstraint(f"skill in {SKILL_VALUES}", name="ck_lessons_skill"),
@@ -585,6 +604,325 @@ class LearnerSkillDifficulty(Base):
     )
 
 
+class XPTransaction(Base):
+    __tablename__ = "xp_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    amount = Column(Integer, nullable=False)
+    source_type = Column(String(50), nullable=False, index=True)
+    source_id = Column(Integer, nullable=False, index=True)
+    reward_key = Column(String(100), nullable=False, index=True)
+    description_key = Column(String(120), nullable=False)
+    metadata_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    user = relationship("User", back_populates="xp_transactions")
+
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_xp_transactions_amount_positive"),
+        UniqueConstraint("user_id", "source_type", "source_id", "reward_key", name="uq_xp_transaction_reward_once"),
+        Index("ix_xp_transactions_user_created", "user_id", "created_at"),
+    )
+
+
+class GamificationSummary(Base):
+    __tablename__ = "gamification_summaries"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    total_xp = Column(Integer, default=0, nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="gamification_summary")
+
+    __table_args__ = (
+        CheckConstraint("total_xp >= 0", name="ck_gamification_summaries_total_xp_non_negative"),
+    )
+
+
+class StreakSummary(Base):
+    __tablename__ = "streak_summaries"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    current_streak = Column(Integer, default=0, nullable=False)
+    longest_streak = Column(Integer, default=0, nullable=False)
+    last_activity_date = Column(Date, nullable=True)
+    streak_started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="streak_summary")
+
+    __table_args__ = (
+        CheckConstraint("current_streak >= 0", name="ck_streak_summaries_current_non_negative"),
+        CheckConstraint("longest_streak >= 0", name="ck_streak_summaries_longest_non_negative"),
+    )
+
+
+class DailyStreakActivity(Base):
+    __tablename__ = "daily_streak_activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    activity_date = Column(Date, nullable=False, index=True)
+    first_qualified_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    source_type = Column(String(50), nullable=False, index=True)
+    source_id = Column(Integer, nullable=False, index=True)
+
+    user = relationship("User", back_populates="daily_streak_activities")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "activity_date", name="uq_daily_streak_activity_user_date"),
+        Index("ix_daily_streak_activities_user_date", "user_id", "activity_date"),
+    )
+
+
+class Badge(Base):
+    __tablename__ = "badges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    badge_key = Column(String(100), unique=True, nullable=False, index=True)
+    name_key = Column(String(160), nullable=False)
+    description_key = Column(String(160), nullable=False)
+    category = Column(String(50), nullable=False, index=True)
+    icon_key = Column(String(50), nullable=False)
+    requirement_type = Column(String(50), nullable=False, index=True)
+    requirement_value = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    user_badges = relationship("UserBadge", back_populates="badge")
+
+    __table_args__ = (
+        CheckConstraint("requirement_value >= 0", name="ck_badges_requirement_value_non_negative"),
+    )
+
+
+class UserBadge(Base):
+    __tablename__ = "user_badges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    badge_id = Column(Integer, ForeignKey("badges.id"), nullable=False, index=True)
+    earned_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    source_type = Column(String(50), nullable=False, index=True)
+    source_id = Column(Integer, nullable=False, index=True)
+
+    user = relationship("User", back_populates="earned_badges")
+    badge = relationship("Badge", back_populates="user_badges")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "badge_id", name="uq_user_badges_user_badge"),
+        Index("ix_user_badges_user_earned", "user_id", "earned_at"),
+    )
+
+
+class FlashcardDeck(Base):
+    __tablename__ = "flashcard_decks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id"), nullable=True, index=True)
+    generated_lesson_plan_id = Column(Integer, ForeignKey("generated_lesson_plans.id"), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    skill = Column(String(30), nullable=False, index=True)
+    learning_language = Column(String(10), nullable=False, index=True)
+    comfortable_language = Column(String(10), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="flashcard_decks")
+    lesson = relationship("Lesson", back_populates="flashcard_decks")
+    generated_lesson_plan = relationship("GeneratedLessonPlan", back_populates="flashcard_decks")
+    flashcards = relationship(
+        "Flashcard",
+        back_populates="deck",
+        cascade="all, delete-orphan",
+        order_by="Flashcard.sequence_order",
+    )
+
+    __table_args__ = (
+        CheckConstraint(f"skill in {QUESTION_SKILLS}", name="ck_flashcard_decks_skill"),
+        CheckConstraint("learning_language in ('en', 'hi', 'ta', 'te', 'kn')", name="ck_flashcard_decks_learning_language"),
+        CheckConstraint("comfortable_language in ('en', 'hi', 'ta', 'te', 'kn')", name="ck_flashcard_decks_comfortable_language"),
+        CheckConstraint(
+            "lesson_id is not null or generated_lesson_plan_id is not null",
+            name="ck_flashcard_decks_has_source",
+        ),
+        UniqueConstraint("user_id", "lesson_id", "title", name="uq_flashcard_decks_user_lesson_title"),
+        UniqueConstraint("user_id", "generated_lesson_plan_id", "title", name="uq_flashcard_decks_user_generated_lesson_title"),
+        Index("ix_flashcard_decks_user_active", "user_id", "is_active"),
+    )
+
+
+class Flashcard(Base):
+    __tablename__ = "flashcards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    deck_id = Column(Integer, ForeignKey("flashcard_decks.id"), nullable=False, index=True)
+    front_text = Column(Text, nullable=False)
+    back_text = Column(Text, nullable=False)
+    example_text = Column(Text, nullable=True)
+    example_translation = Column(Text, nullable=True)
+    pronunciation_text = Column(Text, nullable=True)
+    sequence_order = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    deck = relationship("FlashcardDeck", back_populates="flashcards")
+    progress_records = relationship("FlashcardProgress", back_populates="flashcard")
+
+    __table_args__ = (
+        CheckConstraint("sequence_order > 0", name="ck_flashcards_sequence_positive"),
+        UniqueConstraint("deck_id", "sequence_order", name="uq_flashcards_deck_sequence"),
+        Index("ix_flashcards_deck_order", "deck_id", "sequence_order"),
+    )
+
+
+class FlashcardProgress(Base):
+    __tablename__ = "flashcard_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    flashcard_id = Column(Integer, ForeignKey("flashcards.id"), nullable=False, index=True)
+    review_count = Column(Integer, default=0, nullable=False)
+    correct_count = Column(Integer, default=0, nullable=False)
+    incorrect_count = Column(Integer, default=0, nullable=False)
+    mastery_level = Column(Integer, default=0, nullable=False, index=True)
+    review_interval_days = Column(Integer, default=1, nullable=False)
+    next_review_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_reviewed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="flashcard_progress_records")
+    flashcard = relationship("Flashcard", back_populates="progress_records")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "flashcard_id", name="uq_flashcard_progress_user_card"),
+        CheckConstraint("review_count >= 0", name="ck_flashcard_progress_review_count_non_negative"),
+        CheckConstraint("correct_count >= 0", name="ck_flashcard_progress_correct_count_non_negative"),
+        CheckConstraint("incorrect_count >= 0", name="ck_flashcard_progress_incorrect_count_non_negative"),
+        CheckConstraint("mastery_level >= 0 and mastery_level <= 5", name="ck_flashcard_progress_mastery_range"),
+        CheckConstraint("review_interval_days >= 1", name="ck_flashcard_progress_interval_positive"),
+        Index("ix_flashcard_progress_user_next_review", "user_id", "next_review_at"),
+    )
+
+
+class PuzzleSet(Base):
+    __tablename__ = "puzzle_sets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id"), nullable=True, index=True)
+    generated_lesson_plan_id = Column(Integer, ForeignKey("generated_lesson_plans.id"), nullable=True, index=True)
+    title = Column(String(255), nullable=False)
+    skill = Column(String(30), nullable=False, index=True)
+    difficulty = Column(Integer, nullable=False, index=True)
+    learning_language = Column(String(10), nullable=False, index=True)
+    comfortable_language = Column(String(10), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    user = relationship("User", back_populates="puzzle_sets")
+    lesson = relationship("Lesson", back_populates="puzzle_sets")
+    generated_lesson_plan = relationship("GeneratedLessonPlan", back_populates="puzzle_sets")
+    puzzles = relationship(
+        "Puzzle",
+        back_populates="puzzle_set",
+        cascade="all, delete-orphan",
+        order_by="Puzzle.sequence_order",
+    )
+
+    __table_args__ = (
+        CheckConstraint(f"skill in {QUESTION_SKILLS}", name="ck_puzzle_sets_skill"),
+        CheckConstraint("difficulty >= 1 and difficulty <= 5", name="ck_puzzle_sets_difficulty_range"),
+        CheckConstraint("learning_language in ('en', 'hi', 'ta', 'te', 'kn')", name="ck_puzzle_sets_learning_language"),
+        CheckConstraint("comfortable_language in ('en', 'hi', 'ta', 'te', 'kn')", name="ck_puzzle_sets_comfortable_language"),
+        CheckConstraint(
+            "lesson_id is not null or generated_lesson_plan_id is not null",
+            name="ck_puzzle_sets_has_source",
+        ),
+        UniqueConstraint("user_id", "lesson_id", "title", name="uq_puzzle_sets_user_lesson_title"),
+        UniqueConstraint("user_id", "generated_lesson_plan_id", "title", name="uq_puzzle_sets_user_generated_lesson_title"),
+        Index("ix_puzzle_sets_user_active", "user_id", "is_active"),
+    )
+
+
+class Puzzle(Base):
+    __tablename__ = "puzzles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_set_id = Column(Integer, ForeignKey("puzzle_sets.id"), nullable=False, index=True)
+    puzzle_type = Column(String(30), nullable=False, index=True)
+    instruction_text = Column(Text, nullable=False)
+    instruction_translation = Column(Text, nullable=True)
+    prompt_text = Column(Text, nullable=True)
+    prompt_translation = Column(Text, nullable=True)
+    puzzle_data_json = Column(Text, nullable=False)
+    answer_data_json = Column(Text, nullable=False)
+    sequence_order = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    puzzle_set = relationship("PuzzleSet", back_populates="puzzles")
+    attempts = relationship("PuzzleAttempt", back_populates="puzzle")
+
+    __table_args__ = (
+        CheckConstraint(f"puzzle_type in {PUZZLE_TYPE_VALUES}", name="ck_puzzles_type"),
+        CheckConstraint("sequence_order > 0", name="ck_puzzles_sequence_positive"),
+        UniqueConstraint("puzzle_set_id", "sequence_order", name="uq_puzzles_set_sequence"),
+        Index("ix_puzzles_set_order", "puzzle_set_id", "sequence_order"),
+    )
+
+
+class PuzzleAttempt(Base):
+    __tablename__ = "puzzle_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    puzzle_id = Column(Integer, ForeignKey("puzzles.id"), nullable=False, index=True)
+    submitted_answer_json = Column(Text, nullable=False)
+    is_correct = Column(Boolean, nullable=False, index=True)
+    score = Column(Float, default=0, nullable=False)
+    attempt_number = Column(Integer, nullable=False)
+    completed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    user = relationship("User", back_populates="puzzle_attempts")
+    puzzle = relationship("Puzzle", back_populates="attempts")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "puzzle_id", "attempt_number", name="uq_puzzle_attempt_user_puzzle_number"),
+        CheckConstraint("score >= 0 and score <= 1", name="ck_puzzle_attempts_score_range"),
+        CheckConstraint("attempt_number > 0", name="ck_puzzle_attempts_number_positive"),
+        Index("ix_puzzle_attempts_user_puzzle", "user_id", "puzzle_id"),
+        Index("ix_puzzle_attempts_user_completed", "user_id", "completed_at"),
+    )
+
+
 # The existing learner_progress table is the lesson-progress table for this
 # project. Keep the original class name for API compatibility and expose this
 # alias for the Phase 1A learning-structure terminology.
@@ -608,4 +946,132 @@ class LessonRecommendation(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "lesson_id", "generated_at", name="uq_recommendation_generation_lesson"),
         Index("ix_recommendations_user_active", "user_id", "is_active"),
+    )
+
+
+class LearningPlan(Base):
+    __tablename__ = "learning_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    status = Column(String(30), default="pending", nullable=False, index=True)
+    comfortable_language = Column(String(10), nullable=False, index=True)
+    learning_language = Column(String(10), nullable=False, index=True)
+    learner_summary = Column(Text, nullable=False)
+    weakest_skills = Column(Text, nullable=False, default="[]")
+    strongest_skills = Column(Text, nullable=False, default="[]")
+    generation_model = Column(String(100), nullable=True)
+    generation_version = Column(String(100), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    generated_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", back_populates="learning_plans")
+    generated_courses = relationship(
+        "GeneratedCourse",
+        back_populates="learning_plan",
+        cascade="all, delete-orphan",
+        order_by="GeneratedCourse.sequence_order",
+    )
+
+    __table_args__ = (
+        CheckConstraint(f"status in {LEARNING_PLAN_STATUS_VALUES}", name="ck_learning_plans_status"),
+        Index("ix_learning_plans_user_status", "user_id", "status"),
+        Index("ix_learning_plans_user_languages", "user_id", "comfortable_language", "learning_language"),
+        Index(
+            "uq_learning_plans_user_active",
+            "user_id",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+        ),
+    )
+
+
+class GeneratedCourse(Base):
+    __tablename__ = "generated_courses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    learning_plan_id = Column(Integer, ForeignKey("learning_plans.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    primary_skill = Column(String(30), nullable=False, index=True)
+    difficulty = Column(Integer, nullable=False, index=True)
+    sequence_order = Column(Integer, nullable=False)
+    is_unlocked = Column(Boolean, default=False, nullable=False, index=True)
+    completion_status = Column(String(30), default="not_started", nullable=False, index=True)
+
+    learning_plan = relationship("LearningPlan", back_populates="generated_courses")
+    generated_modules = relationship(
+        "GeneratedModule",
+        back_populates="generated_course",
+        cascade="all, delete-orphan",
+        order_by="GeneratedModule.sequence_order",
+    )
+
+    __table_args__ = (
+        CheckConstraint(f"primary_skill in {QUESTION_SKILLS}", name="ck_generated_courses_primary_skill"),
+        CheckConstraint("difficulty >= 1 and difficulty <= 5", name="ck_generated_courses_difficulty_range"),
+        CheckConstraint("sequence_order > 0", name="ck_generated_courses_sequence_positive"),
+        CheckConstraint(f"completion_status in {LESSON_STATUS_VALUES}", name="ck_generated_courses_completion_status"),
+        UniqueConstraint("learning_plan_id", "sequence_order", name="uq_generated_courses_plan_sequence"),
+        Index("ix_generated_courses_plan_order", "learning_plan_id", "sequence_order"),
+    )
+
+
+class GeneratedModule(Base):
+    __tablename__ = "generated_modules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    generated_course_id = Column(Integer, ForeignKey("generated_courses.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    sequence_order = Column(Integer, nullable=False)
+
+    generated_course = relationship("GeneratedCourse", back_populates="generated_modules")
+    generated_lesson_plans = relationship(
+        "GeneratedLessonPlan",
+        back_populates="generated_module",
+        cascade="all, delete-orphan",
+        order_by="GeneratedLessonPlan.sequence_order",
+    )
+
+    __table_args__ = (
+        CheckConstraint("sequence_order > 0", name="ck_generated_modules_sequence_positive"),
+        UniqueConstraint("generated_course_id", "sequence_order", name="uq_generated_modules_course_sequence"),
+        Index("ix_generated_modules_course_order", "generated_course_id", "sequence_order"),
+    )
+
+
+class GeneratedLessonPlan(Base):
+    __tablename__ = "generated_lesson_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    generated_module_id = Column(Integer, ForeignKey("generated_modules.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    learning_objective = Column(Text, nullable=False)
+    skill = Column(String(30), nullable=False, index=True)
+    difficulty = Column(Integer, nullable=False, index=True)
+    sequence_order = Column(Integer, nullable=False)
+    content_status = Column(String(30), default="not_generated", nullable=False, index=True)
+
+    generated_module = relationship("GeneratedModule", back_populates="generated_lesson_plans")
+    flashcard_decks = relationship("FlashcardDeck", back_populates="generated_lesson_plan")
+    puzzle_sets = relationship("PuzzleSet", back_populates="generated_lesson_plan")
+
+    __table_args__ = (
+        CheckConstraint(f"skill in {QUESTION_SKILLS}", name="ck_generated_lesson_plans_skill"),
+        CheckConstraint("difficulty >= 1 and difficulty <= 5", name="ck_generated_lesson_plans_difficulty_range"),
+        CheckConstraint("sequence_order > 0", name="ck_generated_lesson_plans_sequence_positive"),
+        CheckConstraint(
+            f"content_status in {GENERATED_LESSON_CONTENT_STATUS_VALUES}",
+            name="ck_generated_lesson_plans_content_status",
+        ),
+        UniqueConstraint("generated_module_id", "sequence_order", name="uq_generated_lesson_plans_module_sequence"),
+        Index("ix_generated_lesson_plans_module_order", "generated_module_id", "sequence_order"),
     )

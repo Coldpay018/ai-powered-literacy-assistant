@@ -28,10 +28,16 @@ QUESTION_TYPES: Final[tuple[str, ...]] = (
     "multiple_choice",
     "fill_in_the_blank",
     "sentence_ordering",
+    "sentence_rearrange",
     "reading_comprehension",
     "typing_writing",
     "speaking",
     "listening",
+    "spoken_answer",
+    "reading_aloud",
+    "sentence_repetition",
+    "pronunciation",
+    "spoken_fill_blank",
 )
 
 LEGACY_DIFFICULTY_TO_SCORE: Final[dict[str, int]] = {

@@ -13,6 +13,15 @@ import type {
 
 const experienceOptions = ["Beginner", "Intermediate", "Advanced"] as const;
 
+const educationLabelKeys: Record<string, TranslationKey> = {
+  "No formal education": "option.education.none",
+  Primary: "option.education.primary",
+  Secondary: "option.education.secondary",
+  "Higher Secondary": "option.education.higherSecondary",
+  Undergraduate: "option.education.undergraduate",
+  Graduate: "option.education.graduate",
+};
+
 type ProfileSectionProps = AssessmentState & {
   profile: UserProfile | null;
   profileForm: ProfileForm;
@@ -111,6 +120,12 @@ export function ProfileSection({
     value
       ? LANGUAGE_OPTIONS.find((option) => option.code === normalizeLanguage(value))?.label || value
       : t("common.notAvailable");
+  const educationLabel = (value: string | null) =>
+    value
+      ? educationLabelKeys[value]
+        ? t(educationLabelKeys[value])
+        : value
+      : t("common.notAvailable");
 
   const rows: Array<[string, string]> = [
     [t("common.fullName"), profile.full_name],
@@ -119,7 +134,7 @@ export function ProfileSection({
     [t("common.comfortableLanguage"), languageLabel(profile.comfortable_language)],
     [t("common.learningLanguage"), languageLabel(profile.learning_language)],
     [t("common.experienceLevel"), experienceLabel(profile.experience_level)],
-    [t("common.educationLevel"), profile.education_level],
+    [t("common.educationLevel"), educationLabel(profile.education_level)],
     [t("common.role"), t(`option.role.${profile.role}` as TranslationKey)],
     [t("assessment.status"), status],
     [t("assessment.currentLevel"), level],

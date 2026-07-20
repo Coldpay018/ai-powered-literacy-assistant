@@ -1,6 +1,7 @@
 import type {
-  AssessmentAnswers,
+  AssessmentAnswerValue,
   AssessmentAttempt,
+  AssessmentAnswerResponse,
   AssessmentResult,
   AssessmentStatusResponse,
 } from "./types";
@@ -15,8 +16,24 @@ export class AuthenticationError extends Error {
   }
 }
 
+export class AssessmentApiError extends Error {
+  code: string;
+  status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.name = "AssessmentApiError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export function isAuthenticationError(error: unknown) {
   return error instanceof AuthenticationError;
+}
+
+export function isAssessmentApiError(error: unknown) {
+  return error instanceof AssessmentApiError;
 }
 
 function resolveAccessToken(token?: string) {
@@ -39,6 +56,34 @@ function resolveAccessToken(token?: string) {
   return normalizedToken;
 }
 
+async function parseError(response: Response) {
+  let fallbackMessage = "request_failed";
+  try {
+    const data = (await response.json()) as {
+      detail?: string | { code?: string; message?: string };
+      code?: string;
+      message?: string;
+    };
+    const detail = data.detail;
+    if (typeof detail === "string") {
+      fallbackMessage = detail;
+      return { code: "REQUEST_FAILED", message: fallbackMessage };
+    }
+    if (detail && typeof detail === "object") {
+      return {
+        code: detail.code || "REQUEST_FAILED",
+        message: detail.message || fallbackMessage,
+      };
+    }
+    return {
+      code: data.code || "REQUEST_FAILED",
+      message: data.message || fallbackMessage,
+    };
+  } catch {
+    return { code: "REQUEST_FAILED", message: fallbackMessage };
+  }
+}
+
 async function request<T>(
   path: string,
   token?: string,
@@ -55,22 +100,16 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    let message = "request_failed";
-    try {
-      const data = (await response.json()) as { detail?: string };
-      message = data.detail || message;
-    } catch {
-      message = "request_failed";
-    }
+    const error = await parseError(response);
 
     if (response.status === 401 || response.status === 403) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
       }
-      throw new AuthenticationError(message);
+      throw new AuthenticationError(error.message);
     }
 
-    throw new Error(message);
+    throw new Error(error.message);
   }
 
   return response.json() as Promise<T>;
@@ -90,21 +129,39 @@ export function getCurrentAssessment(token?: string) {
   return request<AssessmentAttempt>("/assessment/current", token);
 }
 
-export function saveAssessmentAnswers(
+export function submitAssessmentAnswer(
   token: string | undefined,
   attemptId: number,
-  answers: AssessmentAnswers,
+  attemptQuestionId: number,
+  answer: AssessmentAnswerValue,
 ) {
-  return request<{ saved: boolean; saved_count: number }>(
-    `/assessment/attempts/${attemptId}/answers`,
+  return request<AssessmentAnswerResponse>(
+    `/assessment/attempts/${attemptId}/answer`,
     token,
     {
-      method: "PUT",
+      method: "POST",
       body: JSON.stringify({
-        answers: Object.entries(answers).map(([attemptQuestionId, answer]) => ({
-          attempt_question_id: Number(attemptQuestionId),
-          answer,
-        })),
+        attempt_question_id: attemptQuestionId,
+        answer,
+      }),
+    },
+  );
+}
+
+export function submitAssessmentSpokenAnswer(
+  token: string | undefined,
+  attemptId: number,
+  attemptQuestionId: number,
+  spokenText: string,
+) {
+  return request<AssessmentAnswerResponse>(
+    `/assessment/attempts/${attemptId}/spoken-answer`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        attempt_question_id: attemptQuestionId,
+        spoken_text: spokenText,
       }),
     },
   );

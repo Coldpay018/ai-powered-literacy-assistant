@@ -39,7 +39,7 @@ export function ResourcesSection({
                 <LiteracyIcon name={resourceIcons[index] || "book"} className="h-10 w-10" />
               </span>
               <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-xs font-black text-[#0F766E]"}>
-                {resource.type}
+                {t(resource.typeKey)}
               </span>
             </div>
             <h2 className="text-xl font-black tracking-normal">{t(resource.titleKey)}</h2>

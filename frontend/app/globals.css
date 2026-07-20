@@ -23,13 +23,15 @@
   --odyssey-cream: #fbfaf4;
   --odyssey-border: #dfe8e4;
   --odyssey-shadow: 0 22px 60px rgba(7, 25, 47, 0.12);
+  --app-font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
+  --app-font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +53,8 @@ html[data-theme="light"] {
   --app-text-muted: #667085;
   --app-border: #dde4e1;
   --app-shadow: 0 22px 60px rgba(7, 25, 47, 0.12);
+  --app-font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
+  --app-font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
 }
 
 html[data-theme="dark"] {
@@ -65,12 +69,14 @@ html[data-theme="dark"] {
   --app-text-muted: #b8c7c5;
   --app-border: rgba(255, 255, 255, 0.1);
   --app-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+  --app-font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
+  --app-font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--app-font-sans);
   overflow-x: hidden;
 }
 

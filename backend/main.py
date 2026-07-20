@@ -8,27 +8,58 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session, joinedload
 
-from assessment_service import (
+from assessment_flow_service import (
+    complete_assessment,
     current_attempt,
-    get_result,
     get_status,
-    save_answers,
     start_or_resume,
-    submit_attempt,
+    submit_assessment_answer,
 )
+from assessment_service import get_result
 from auth import create_access_token, decode_access_token, hash_password, verify_password
 from database import Base, SessionLocal, engine
+from gamification_service import (
+    award_lesson_completion_xp,
+    award_perfect_quiz_xp,
+    get_user_badges,
+    get_recent_xp_transactions,
+    get_streak_summary,
+    get_total_xp,
+    get_week_start,
+    get_xp_earned_since,
+    seed_badges,
+)
+from flashcard_service import (
+    get_due_flashcards,
+    get_flashcard_deck,
+    list_flashcard_decks,
+    record_flashcard_review,
+)
+from puzzle_service import (
+    get_puzzle_set,
+    get_puzzle_set_progress,
+    list_puzzle_sets,
+    submit_puzzle_attempt,
+)
 from learning_content_service import (
     get_published_course,
     get_published_lesson,
     get_published_module,
+    get_or_create_lesson_progress,
+    is_lesson_unlocked,
     list_published_courses,
     list_published_modules,
+    navigation_item,
+    ordered_course_lessons,
+    progress_status_map,
+    repair_initial_unlock_state,
     serialize_course_detail,
     serialize_course_summary,
     serialize_lesson_detail,
     serialize_module_detail,
     serialize_module_summary,
+    start_unlocked_lesson_progress,
+    sync_progress_metadata,
     validate_difficulty_filter,
     validate_language_filter,
     validate_skill_filter,
@@ -40,13 +71,19 @@ from adaptive_difficulty_service import evaluate_difficulty
 from question_difficulty_service import build_starting_difficulty_profile
 from schema_updates import apply_sqlite_schema_updates
 from schemas import (
-    AssessmentAnswersRequest,
     AssessmentAttemptResponse,
+    AssessmentAnswerRequest,
+    AssessmentAnswerResponse,
+    AssessmentSpokenAnswerRequest,
     AssessmentResultResponse,
-    AssessmentSaveResponse,
     AssessmentStatusResponse,
+    BadgeSummaryResponse,
     CourseDetailResponse,
     CourseSummaryResponse,
+    FlashcardDeckResponse,
+    FlashcardResponse,
+    FlashcardReviewRequest,
+    FlashcardReviewResponse,
     LearnerProgressResponse,
     LessonDetailResponse,
     LessonProgressUpdate,
@@ -59,13 +96,19 @@ from schemas import (
     ModuleSummaryResponse,
     PersonalizedLearningPlanResponse,
     PersonalizationProfileResponse,
+    PuzzleAttemptRequest,
+    PuzzleAttemptResponse,
+    PuzzleSetProgressResponse,
+    PuzzleSetResponse,
     RecommendedLessonResponse,
     StartingDifficultyResponse,
     TokenResponse,
     UserCreate,
     UserResponse,
     UserUpdate,
+    XPSummaryResponse,
 )
+from spoken_answer_service import submit_spoken_assessment_answer
 from seed_assessment import seed_initial_assessment
 from seed_learning_content import seed_learning_content
 
@@ -76,8 +119,10 @@ async def lifespan(app: FastAPI):
     apply_sqlite_schema_updates(engine)
     db = SessionLocal()
     try:
+        seed_badges(db)
         seed_initial_assessment(db)
         seed_learning_content(db)
+        db.commit()
     finally:
         db.close()
     yield
@@ -255,23 +300,41 @@ def assessment_current(
     return current_attempt(db, current_user)
 
 
-@app.put("/assessment/attempts/{attempt_id}/answers", response_model=AssessmentSaveResponse)
-def assessment_save_answers(
+@app.put("/assessment/attempts/{attempt_id}/answers", response_model=AssessmentAnswerResponse)
+@app.post("/assessment/attempts/{attempt_id}/answer", response_model=AssessmentAnswerResponse)
+def assessment_answer(
     attempt_id: int,
-    request: AssessmentAnswersRequest,
+    request: AssessmentAnswerRequest,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return save_answers(db, current_user, attempt_id, request.answers)
+    return submit_assessment_answer(db, current_user, attempt_id, request.attempt_question_id, request.answer)
+
+
+@app.post("/assessment/attempts/{attempt_id}/spoken-answer", response_model=AssessmentAnswerResponse)
+def assessment_spoken_answer(
+    attempt_id: int,
+    request: AssessmentSpokenAnswerRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return submit_spoken_assessment_answer(
+        db,
+        current_user,
+        attempt_id,
+        request.attempt_question_id,
+        request.spoken_text,
+    )
 
 
 @app.post("/assessment/attempts/{attempt_id}/submit", response_model=AssessmentResultResponse)
+@app.post("/assessment/attempts/{attempt_id}/complete", response_model=AssessmentResultResponse)
 def assessment_submit(
     attempt_id: int,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return submit_attempt(db, current_user, attempt_id)
+    return complete_assessment(db, current_user, attempt_id)
 
 
 @app.get("/assessment/result", response_model=AssessmentResultResponse)
@@ -355,143 +418,22 @@ def list_lessons(
 
 
 @app.get("/lessons/{lesson_id}", response_model=LessonDetailResponse)
-def read_lesson(lesson_id: int, db: Session = Depends(get_db)):
-    return serialize_lesson_detail(get_published_lesson(db, lesson_id))
-
-
-def _get_or_create_lesson_progress(
-    db: Session,
-    user_id: int,
+def read_lesson(
     lesson_id: int,
-) -> models.LearnerProgress:
-    lesson = (
-        db.query(models.Lesson)
-        .filter(models.Lesson.id == lesson_id, models.Lesson.is_active == True)
-        .first()
-    )
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    progress = (
-        db.query(models.LearnerProgress)
-        .filter(
-            models.LearnerProgress.user_id == user_id,
-            models.LearnerProgress.lesson_id == lesson_id,
-        )
-        .first()
-    )
-    if not progress:
-        progress = models.LearnerProgress(
-            user_id=user_id,
-            course_id=lesson.course_id,
-            module_id=lesson.module_id,
-            lesson_id=lesson_id,
-            completion_status="not_started",
-            status="not_started",
-            progress_percentage=0,
-            current_difficulty=lesson.proficiency_level,
-        )
-        db.add(progress)
-        db.flush()
-    progress.course_id = lesson.course_id
-    progress.module_id = lesson.module_id
-    progress.current_difficulty = lesson.proficiency_level
-    if not progress.completion_status:
-        progress.completion_status = progress.status
-    return progress
-
-
-def _course_lessons(course: models.Course) -> list[models.Lesson]:
-    ordered_lessons: list[models.Lesson] = []
-
-    modules = sorted(
-        [module for module in course.modules if module.is_published],
-        key=lambda module: (
-            module.sequence_order if module.sequence_order is not None else 0,
-            module.title or "",
-        ),
-    )
-    for module in modules:
-        module_lessons = sorted(
-            [lesson for lesson in module.lessons if lesson.is_active and lesson.is_published],
-            key=lambda lesson: (
-                lesson.sequence_order if lesson.sequence_order is not None else 0,
-                lesson.title or "",
-            ),
-        )
-        ordered_lessons.extend(module_lessons)
-
-    standalone_lessons = sorted(
-        [
-            lesson
-            for lesson in course.lessons
-            if lesson.is_active and lesson.is_published and lesson.module_id is None
-        ],
-        key=lambda lesson: (
-            lesson.sequence_order if lesson.sequence_order is not None else 0,
-            lesson.title or "",
-        ),
-    )
-    ordered_lessons.extend(standalone_lessons)
-    return ordered_lessons
-
-
-def _progress_status_map(
-    db: Session,
-    user_id: int,
-    lessons: list[models.Lesson],
-) -> dict[int, models.LearnerProgress]:
-    lesson_ids = [lesson.id for lesson in lessons]
-    if not lesson_ids:
-        return {}
-    rows = (
-        db.query(models.LearnerProgress)
-        .filter(
-            models.LearnerProgress.user_id == user_id,
-            models.LearnerProgress.lesson_id.in_(lesson_ids),
-        )
-        .all()
-    )
-    return {row.lesson_id: row for row in rows}
-
-
-def _sync_progress_metadata(progress: models.LearnerProgress, lesson: models.Lesson) -> None:
-    progress.course_id = lesson.course_id
-    progress.module_id = lesson.module_id
-    progress.current_difficulty = lesson.proficiency_level
-    progress.completion_status = progress.status
-
-
-def _is_lesson_unlocked(
-    lesson: models.Lesson,
-    lessons: list[models.Lesson],
-    progress_by_lesson: dict[int, models.LearnerProgress],
-) -> bool:
-    index = next((position for position, item in enumerate(lessons) if item.id == lesson.id), 0)
-    if index <= 0:
-        return True
-    current_progress = progress_by_lesson.get(lesson.id)
-    if current_progress and current_progress.status in {"in_progress", "completed"}:
-        return True
-    previous_lesson = lessons[index - 1]
-    previous_progress = progress_by_lesson.get(previous_lesson.id)
-    return previous_progress is not None and previous_progress.status == "completed"
-
-
-def _navigation_item(
-    lesson: models.Lesson | None,
-    lessons: list[models.Lesson],
-    progress_by_lesson: dict[int, models.LearnerProgress],
-) -> dict | None:
-    if lesson is None:
-        return None
-    progress = progress_by_lesson.get(lesson.id)
-    is_unlocked = _is_lesson_unlocked(lesson, lessons, progress_by_lesson)
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    lesson = get_published_lesson(db, lesson_id)
+    lessons = ordered_course_lessons(lesson.course)
+    progress_by_lesson = progress_status_map(db, current_user.id, lessons)
+    repair_initial_unlock_state(db, current_user.id, lessons, progress_by_lesson)
+    if not is_lesson_unlocked(lesson, lessons, progress_by_lesson):
+        raise HTTPException(status_code=423, detail="Lesson is locked")
+    db.commit()
     return {
-        "id": lesson.id,
-        "title": lesson.title,
-        "status": progress.status if progress else "not_started",
-        "is_unlocked": is_unlocked,
-        "locked": not is_unlocked,
+        **serialize_lesson_detail(lesson),
+        "is_unlocked": True,
+        "locked": False,
     }
 
 
@@ -502,48 +444,33 @@ def read_lesson_player(
     db: Session = Depends(get_db),
 ):
     lesson = get_published_lesson(db, lesson_id)
-    lessons = _course_lessons(lesson.course)
-    progress_by_lesson = _progress_status_map(db, current_user.id, lessons)
-    is_unlocked = _is_lesson_unlocked(lesson, lessons, progress_by_lesson)
+    lessons = ordered_course_lessons(lesson.course)
+    progress_by_lesson = progress_status_map(db, current_user.id, lessons)
+    repair_initial_unlock_state(db, current_user.id, lessons, progress_by_lesson)
+    is_unlocked = is_lesson_unlocked(lesson, lessons, progress_by_lesson)
     index = next((position for position, item in enumerate(lessons) if item.id == lesson.id), 0)
     previous_lesson = lessons[index - 1] if index > 0 else None
     next_lesson = lessons[index + 1] if index + 1 < len(lessons) else None
 
-    progress = progress_by_lesson.get(lesson.id)
-    if is_unlocked:
-        progress = _get_or_create_lesson_progress(db, current_user.id, lesson.id)
-        _sync_progress_metadata(progress, lesson)
-        now = datetime.now(timezone.utc)
-        progress.last_accessed_at = now
-        if progress.status == "not_started":
-            progress.status = "in_progress"
-            progress.completion_status = "in_progress"
-            progress.started_at = progress.started_at or now
-            progress.progress_percentage = max(progress.progress_percentage, 1)
-        db.commit()
-        db.refresh(progress)
-        progress_by_lesson[lesson.id] = progress
-    else:
-        progress = _get_or_create_lesson_progress(db, current_user.id, lesson.id)
-        _sync_progress_metadata(progress, lesson)
-        progress.last_accessed_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(progress)
-        progress_by_lesson[lesson.id] = progress
+    if not is_unlocked:
+        db.rollback()
+        raise HTTPException(status_code=423, detail="Lesson is locked")
+
+    progress = start_unlocked_lesson_progress(db, current_user.id, lesson)
+    db.commit()
+    db.refresh(progress)
+    progress_by_lesson[lesson.id] = progress
 
     detail = serialize_lesson_detail(lesson)
-    if not is_unlocked:
-        detail["content_blocks"] = []
-        detail["questions"] = []
 
     return {
         **detail,
         "progress": progress,
         "is_unlocked": is_unlocked,
         "locked": not is_unlocked,
-        "lock_reason": "Complete the previous lesson to unlock this lesson." if not is_unlocked else None,
-        "previous_lesson": _navigation_item(previous_lesson, lessons, progress_by_lesson),
-        "next_lesson": _navigation_item(next_lesson, lessons, progress_by_lesson),
+        "lock_reason": None,
+        "previous_lesson": navigation_item(previous_lesson, lessons, progress_by_lesson),
+        "next_lesson": navigation_item(next_lesson, lessons, progress_by_lesson),
     }
 
 
@@ -611,13 +538,13 @@ def update_lesson_progress(
     )
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
-    lessons = _course_lessons(course)
-    progress_by_lesson = _progress_status_map(db, current_user.id, lessons)
-    if not _is_lesson_unlocked(lesson, lessons, progress_by_lesson):
+    lessons = ordered_course_lessons(course)
+    progress_by_lesson = progress_status_map(db, current_user.id, lessons)
+    repair_initial_unlock_state(db, current_user.id, lessons, progress_by_lesson)
+    if not is_lesson_unlocked(lesson, lessons, progress_by_lesson):
         raise HTTPException(status_code=423, detail="Lesson is locked")
 
-    progress = _get_or_create_lesson_progress(db, current_user.id, lesson_id)
-    _sync_progress_metadata(progress, lesson)
+    progress = get_or_create_lesson_progress(db, current_user.id, lesson)
 
     now = datetime.now(timezone.utc)
     if request.status is not None:
@@ -659,6 +586,8 @@ def update_lesson_progress(
         progress.started_at = progress.started_at or now
 
     progress.last_accessed_at = now
+    if progress.completion_status == "completed":
+        award_lesson_completion_xp(db, user_id=current_user.id, lesson_id=lesson_id)
     db.commit()
     db.refresh(progress)
     return progress
@@ -672,9 +601,10 @@ def submit_lesson_quiz(
     db: Session = Depends(get_db),
 ):
     lesson = get_published_lesson(db, lesson_id)
-    lessons = _course_lessons(lesson.course)
-    progress_by_lesson = _progress_status_map(db, current_user.id, lessons)
-    if not _is_lesson_unlocked(lesson, lessons, progress_by_lesson):
+    lessons = ordered_course_lessons(lesson.course)
+    progress_by_lesson = progress_status_map(db, current_user.id, lessons)
+    repair_initial_unlock_state(db, current_user.id, lessons, progress_by_lesson)
+    if not is_lesson_unlocked(lesson, lessons, progress_by_lesson):
         raise HTTPException(status_code=423, detail="Lesson is locked")
 
     questions = sorted(lesson.questions, key=lambda item: item.sequence_order)
@@ -743,8 +673,7 @@ def submit_lesson_quiz(
 
     score = round((awarded_points / total_points) * 100, 2) if total_points else 0
     if duplicate_attempt:
-        progress = _get_or_create_lesson_progress(db, current_user.id, lesson_id)
-        _sync_progress_metadata(progress, lesson)
+        progress = get_or_create_lesson_progress(db, current_user.id, lesson)
         return {
             "score": duplicate_attempt.score,
             "total_points": duplicate_attempt.total_points,
@@ -756,8 +685,7 @@ def submit_lesson_quiz(
             "difficulty_adjustments": [],
         }
 
-    progress = _get_or_create_lesson_progress(db, current_user.id, lesson_id)
-    _sync_progress_metadata(progress, lesson)
+    progress = get_or_create_lesson_progress(db, current_user.id, lesson)
     now = datetime.now(timezone.utc)
     progress.status = "completed"
     progress.completion_status = "completed"
@@ -787,6 +715,8 @@ def submit_lesson_quiz(
         completed_at=now,
     )
     db.add(attempt)
+    award_lesson_completion_xp(db, user_id=current_user.id, lesson_id=lesson_id)
+    award_perfect_quiz_xp(db, user_id=current_user.id, lesson_id=lesson_id, score=score)
     db.commit()
     db.refresh(progress)
     return {
@@ -812,6 +742,116 @@ def progress_me(
         .order_by(models.LearnerProgress.last_accessed_at.desc().nullslast(), models.LearnerProgress.id.desc())
         .all()
     )
+
+
+@app.get("/gamification/xp", response_model=XPSummaryResponse)
+def gamification_xp(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    week_start = get_week_start()
+    return {
+        "total_xp": get_total_xp(db, current_user.id),
+        "xp_earned_this_week": get_xp_earned_since(db, current_user.id, week_start),
+        "recent_transactions": get_recent_xp_transactions(db, current_user.id),
+        **get_streak_summary(db, current_user.id),
+    }
+
+
+@app.get("/gamification/badges", response_model=BadgeSummaryResponse)
+def gamification_badges(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    response = get_user_badges(db, current_user.id)
+    db.commit()
+    return response
+
+
+@app.get("/flashcards/decks", response_model=list[FlashcardDeckResponse])
+def flashcard_decks(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return list_flashcard_decks(db, current_user.id)
+
+
+@app.get("/flashcards/decks/{deck_id}", response_model=FlashcardDeckResponse)
+def flashcard_deck(
+    deck_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_flashcard_deck(db, current_user.id, deck_id)
+
+
+@app.get("/flashcards/decks/{deck_id}/due", response_model=list[FlashcardResponse])
+def flashcard_due_cards(
+    deck_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_due_flashcards(db, user_id=current_user.id, deck_id=deck_id)
+
+
+@app.post("/flashcards/{flashcard_id}/review", response_model=FlashcardReviewResponse)
+def flashcard_review(
+    flashcard_id: int,
+    request: FlashcardReviewRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    response = record_flashcard_review(
+        db,
+        user_id=current_user.id,
+        flashcard_id=flashcard_id,
+        outcome=request.outcome,
+    )
+    db.commit()
+    return response
+
+
+@app.get("/puzzles/sets", response_model=list[PuzzleSetResponse])
+def puzzle_sets(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return list_puzzle_sets(db, current_user.id)
+
+
+@app.get("/puzzles/sets/{set_id}", response_model=PuzzleSetResponse)
+def puzzle_set(
+    set_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_puzzle_set(db, current_user.id, set_id)
+
+
+@app.get("/puzzles/sets/{set_id}/progress", response_model=PuzzleSetProgressResponse)
+def puzzle_set_progress(
+    set_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_puzzle_set_progress(db, current_user.id, set_id)
+
+
+@app.post("/puzzles/{puzzle_id}/attempt", response_model=PuzzleAttemptResponse)
+def puzzle_attempt(
+    puzzle_id: int,
+    request: PuzzleAttemptRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    response = submit_puzzle_attempt(
+        db,
+        user_id=current_user.id,
+        puzzle_id=puzzle_id,
+        submitted_answer=request.submitted_answer,
+    )
+    db.commit()
+    return response
 
 
 @app.get("/learning-plan/me", response_model=PersonalizedLearningPlanResponse)

@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 import sys
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -12,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import models
 import recommendation_service
 from database import Base
-from recommendation_service import generate_recommendations, learning_plan
+from recommendation_service import current_recommendations, generate_recommendations, learning_plan
 from schemas import LessonProgressUpdate
 from seed_learning_content import seed_learning_content
 
@@ -73,8 +74,8 @@ class RecommendationServiceTests(unittest.TestCase):
         recommendations = generate_recommendations(self.db, self.user)
 
         self.assertGreaterEqual(len(recommendations), 4)
-        self.assertEqual(recommendations[0]["skill_type"], "writing")
-        self.assertIn("lowest-scoring skill", recommendations[0]["recommendation_reason"])
+        self.assertTrue(any(item["skill_type"] == "writing" for item in recommendations))
+        self.assertTrue(any("lowest-scoring skill" in item["recommendation_reason"] for item in recommendations))
 
     def test_completed_lessons_are_excluded(self):
         lesson = self.db.query(models.Lesson).filter(models.Lesson.skill_type == "writing").first()
@@ -133,6 +134,118 @@ class RecommendationServiceTests(unittest.TestCase):
 
         self.assertEqual(active_count, len(second))
         self.assertEqual(len(first), len(second))
+
+    def test_current_recommendations_include_unlock_and_sequence_metadata(self):
+        recommendations = generate_recommendations(self.db, self.user)
+
+        self.assertTrue(recommendations)
+        first = recommendations[0]
+        self.assertIn("module_id", first)
+        self.assertIn("module_order", first)
+        self.assertIn("sequence_order", first)
+        self.assertIn("is_unlocked", first)
+        self.assertIn("completion_status", first)
+        self.assertEqual(first["completion_status"], first["current_progress_status"])
+        self.assertTrue(any(item["is_unlocked"] for item in recommendations))
+
+    def test_recommendations_include_actual_first_unlocked_lesson_for_new_user(self):
+        recommendations = generate_recommendations(self.db, self.user)
+        course = (
+            self.db.query(models.Course)
+            .filter(
+                models.Course.language == self.user.learning_language,
+                models.Course.proficiency_level == self.result.proficiency_level,
+            )
+            .first()
+        )
+        first_lesson = min(course.lessons, key=lambda lesson: (lesson.sequence_order, lesson.id))
+
+        self.assertEqual(recommendations[0]["lesson_id"], first_lesson.id)
+        self.assertTrue(recommendations[0]["is_unlocked"])
+        self.assertEqual(recommendations[0]["completion_status"], "not_started")
+
+    def test_broken_user_progress_is_repaired_without_unlocking_everything(self):
+        course = (
+            self.db.query(models.Course)
+            .filter(
+                models.Course.language == self.user.learning_language,
+                models.Course.proficiency_level == self.result.proficiency_level,
+            )
+            .first()
+        )
+        ordered_lessons = sorted(course.lessons, key=lambda lesson: (lesson.sequence_order, lesson.id))
+        self.db.add(
+            models.LearnerProgress(
+                user_id=self.user.id,
+                course_id=ordered_lessons[1].course_id,
+                module_id=ordered_lessons[1].module_id,
+                lesson_id=ordered_lessons[1].id,
+                status="in_progress",
+                completion_status="in_progress",
+                progress_percentage=45,
+            )
+        )
+        self.db.commit()
+
+        recommendations = generate_recommendations(self.db, self.user)
+        progress_rows = (
+            self.db.query(models.LearnerProgress)
+            .filter(models.LearnerProgress.user_id == self.user.id)
+            .all()
+        )
+        unlocked_ids = [item["lesson_id"] for item in recommendations if item["is_unlocked"]]
+
+        self.assertIn(ordered_lessons[0].id, unlocked_ids)
+        self.assertNotIn(ordered_lessons[1].id, unlocked_ids)
+        repaired_later = (
+            self.db.query(models.LearnerProgress)
+            .filter(
+                models.LearnerProgress.user_id == self.user.id,
+                models.LearnerProgress.lesson_id == ordered_lessons[1].id,
+            )
+            .first()
+        )
+        self.assertEqual(repaired_later.status, "not_started")
+        self.assertEqual(repaired_later.progress_percentage, 0)
+        self.assertEqual(
+            self.db.query(models.LearnerProgress)
+            .filter(
+                models.LearnerProgress.user_id == self.user.id,
+                models.LearnerProgress.lesson_id == ordered_lessons[0].id,
+            )
+            .count(),
+            1,
+        )
+        self.assertLess(len([row for row in progress_rows if row.status in {"in_progress", "completed"}]), len(ordered_lessons))
+
+    def test_current_recommendations_deduplicate_duplicate_lesson_rows(self):
+        lesson = self.db.query(models.Lesson).filter(models.Lesson.skill_type == "writing").first()
+        first_generated_at = datetime.now(timezone.utc)
+        recommendation = models.LessonRecommendation(
+            user_id=self.user.id,
+            lesson_id=lesson.id,
+            recommendation_score=0.99,
+            recommendation_reason="Duplicate test row",
+            generated_at=first_generated_at,
+            is_active=True,
+        )
+        duplicate = models.LessonRecommendation(
+            user_id=self.user.id,
+            lesson_id=lesson.id,
+            recommendation_score=0.88,
+            recommendation_reason="Duplicate test row 2",
+            generated_at=first_generated_at.replace(microsecond=min(first_generated_at.microsecond + 1, 999999)),
+            is_active=True,
+        )
+        self.db.add(recommendation)
+        self.db.add(duplicate)
+        self.db.commit()
+
+        rows = current_recommendations(self.db, self.user)
+        lesson_ids = [item["lesson_id"] for item in rows]
+
+        self.assertEqual(len(lesson_ids), len(set(lesson_ids)))
+        self.assertEqual(lesson_ids.count(lesson.id), 1)
 
     def test_learning_plan_contains_completion_summary(self):
         plan = learning_plan(self.db, self.user)

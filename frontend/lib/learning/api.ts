@@ -1,11 +1,19 @@
 import type {
   CourseDetail,
+  BadgeSummary,
+  Flashcard,
+  FlashcardDeck,
+  FlashcardReviewResponse,
   LearnerProgress,
   LearningPlan,
   LessonPlayer,
   LessonQuizSubmitResponse,
+  PuzzleAttemptResponse,
+  PuzzleSet,
+  PuzzleSetProgress,
   ProgressRecord,
   ProgressStatus,
+  XPSummary,
 } from "./types";
 import { API_BASE_URL } from "@/lib/api/config";
 
@@ -85,4 +93,58 @@ export function submitLessonQuiz(
 
 export function getProgressRecords(token: string) {
   return request<ProgressRecord[]>("/progress/me", token);
+}
+
+export function getXPSummary(token: string) {
+  return request<XPSummary>("/gamification/xp", token);
+}
+
+export function getBadgeSummary(token: string) {
+  return request<BadgeSummary>("/gamification/badges", token);
+}
+
+export function getFlashcardDecks(token: string) {
+  return request<FlashcardDeck[]>("/flashcards/decks", token);
+}
+
+export function getFlashcardDeck(token: string, deckId: number) {
+  return request<FlashcardDeck>(`/flashcards/decks/${deckId}`, token);
+}
+
+export function getDueFlashcards(token: string, deckId: number) {
+  return request<Flashcard[]>(`/flashcards/decks/${deckId}/due`, token);
+}
+
+export function reviewFlashcard(
+  token: string,
+  flashcardId: number,
+  outcome: "need_practice" | "know",
+) {
+  return request<FlashcardReviewResponse>(`/flashcards/${flashcardId}/review`, token, {
+    method: "POST",
+    body: JSON.stringify({ outcome }),
+  });
+}
+
+export function getPuzzleSets(token: string) {
+  return request<PuzzleSet[]>("/puzzles/sets", token);
+}
+
+export function getPuzzleSet(token: string, setId: number) {
+  return request<PuzzleSet>(`/puzzles/sets/${setId}`, token);
+}
+
+export function getPuzzleSetProgress(token: string, setId: number) {
+  return request<PuzzleSetProgress>(`/puzzles/sets/${setId}/progress`, token);
+}
+
+export function submitPuzzleAttempt(
+  token: string,
+  puzzleId: number,
+  submittedAnswer: unknown,
+) {
+  return request<PuzzleAttemptResponse>(`/puzzles/${puzzleId}/attempt`, token, {
+    method: "POST",
+    body: JSON.stringify({ submitted_answer: submittedAnswer }),
+  });
 }

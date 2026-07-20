@@ -5,10 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import { BrandMark } from "@/components/brand/BrandMark";
 import { useLanguage } from "@/components/LanguageProvider";
 import { LiteracyIcon } from "@/components/ui/LiteracyIllustrations";
+import { TTSControls } from "@/components/tts/TTSControls";
 import { API_BASE_URL } from "@/lib/api/config";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { getLessonPlayer, submitLessonQuiz, updateLessonProgress } from "@/lib/learning/api";
 import type { LessonContentBlock, LessonPlayer, LessonQuizSubmitResponse } from "@/lib/learning/types";
+import { buildLessonSpeechConfig } from "@/lib/tts/content";
 import { applyDocumentTheme } from "@/lib/theme";
 
 type Theme = "light" | "dark";
@@ -48,9 +50,13 @@ function getElapsedSeconds(startedAt: number | null) {
 
 function BlockContent({
   block,
+  speechConfig,
+  t,
   isDark,
 }: {
   block: LessonContentBlock;
+  speechConfig: { text: string; language: string | null; label: TranslationKey } | null;
+  t: (key: TranslationKey, replacements?: Record<string, string | number>) => string;
   isDark: boolean;
 }) {
   const items = asStringList(block.metadata?.items);
@@ -95,9 +101,22 @@ function BlockContent({
   }
 
   return (
-    <p className={isDark ? "whitespace-pre-wrap text-base leading-8 text-teal-50/78" : "whitespace-pre-wrap text-base leading-8 text-[#334642]"}>
-      {block.text_content}
-    </p>
+    <>
+      {speechConfig ? (
+        <div className="mb-4">
+          <TTSControls
+            text={speechConfig.text}
+            language={speechConfig.language}
+            label={speechConfig.label}
+            t={t}
+            isDark={isDark}
+          />
+        </div>
+      ) : null}
+      <p className={isDark ? "whitespace-pre-wrap text-base leading-8 text-teal-50/78" : "whitespace-pre-wrap text-base leading-8 text-[#334642]"}>
+        {block.text_content}
+      </p>
+    </>
   );
 }
 
@@ -109,6 +128,7 @@ export default function LessonPlayerPage() {
   const [theme, setTheme] = useState<Theme>("light");
   const [mounted, setMounted] = useState(false);
   const [lesson, setLesson] = useState<LessonPlayer | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [quizResult, setQuizResult] = useState<LessonQuizSubmitResponse | null>(null);
@@ -155,6 +175,7 @@ export default function LessonPlayerPage() {
         });
         if (profileResponse.ok) {
           const user = (await profileResponse.json()) as UserProfile;
+          setProfile(user);
           const resolvedUiLanguage = setLanguageFromValue(user.comfortable_language);
           console.log({
             comfortableLanguage: user.comfortable_language,
@@ -195,6 +216,13 @@ export default function LessonPlayerPage() {
   const mutedText = isDark ? "text-teal-50/66" : "text-[#667085]";
   const blockTabs = useMemo(() => lesson?.content_blocks || [], [lesson]);
   const progressRecord = quizResult?.progress ?? lesson?.progress ?? null;
+  const speechConfig = currentBlock
+    ? buildLessonSpeechConfig(
+        currentBlock,
+        profile?.comfortable_language,
+        profile?.learning_language || lesson?.language,
+      )
+    : null;
 
   async function saveProgress(nextIndex: number) {
     if (!lesson) {
@@ -290,6 +318,17 @@ export default function LessonPlayerPage() {
           <p className={isDark ? "text-sm font-black text-[#63D8C8]" : "text-sm font-black text-[#0F766E]"}>{t("lesson.player")}</p>
           <h1 className="mt-2 break-words text-2xl font-black tracking-normal">{lesson?.title || t("common.loading")}</h1>
           <p className={`mt-3 text-sm leading-6 ${mutedText}`}>{lesson?.description}</p>
+          {lesson?.description ? (
+            <div className="mt-4">
+              <TTSControls
+                text={lesson.description}
+                language={profile?.comfortable_language || lesson.language}
+                label="tts.readExplanation"
+                t={t}
+                isDark={isDark}
+              />
+            </div>
+          ) : null}
           <div className="mt-5">
             <div className={isDark ? "h-3 overflow-hidden rounded-full bg-white/10" : "h-3 overflow-hidden rounded-full bg-[var(--app-surface-muted)]"}>
               <div className="h-full rounded-full bg-gradient-to-r from-[#0F766E] to-[#14B8A6]" style={{ width: `${progressValue}%` }} />
@@ -304,7 +343,7 @@ export default function LessonPlayerPage() {
               </div>
               <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.timeSpent")}</p>
-                <p className="mt-1 text-sm font-black">{progressRecord.time_spent_seconds}s</p>
+                <p className="mt-1 text-sm font-black">{t("dashboard.timeSpentSeconds", { seconds: progressRecord.time_spent_seconds })}</p>
               </div>
               <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.score")}</p>
@@ -312,7 +351,11 @@ export default function LessonPlayerPage() {
               </div>
               <div className={isDark ? "rounded-2xl bg-white/8 p-3" : "rounded-2xl bg-[var(--app-surface-muted)] p-3"}>
                 <p className={mutedText}>{t("lesson.currentDifficulty")}</p>
-                <p className="mt-1 text-sm font-black">{progressRecord.current_difficulty || t("common.notAvailable")}</p>
+                <p className="mt-1 text-sm font-black">
+                  {progressRecord.current_difficulty
+                    ? t(`assessment.level.${progressRecord.current_difficulty.toLowerCase()}` as TranslationKey)
+                    : t("common.notAvailable")}
+                </p>
               </div>
             </div>
           ) : null}
@@ -376,7 +419,7 @@ export default function LessonPlayerPage() {
                   </span>
                 </div>
                 <div className="mt-6">
-                  <BlockContent block={currentBlock} isDark={isDark} />
+                  <BlockContent block={currentBlock} speechConfig={speechConfig} t={t} isDark={isDark} />
                 </div>
               </article>
 
@@ -390,6 +433,15 @@ export default function LessonPlayerPage() {
                     const result = quizResult?.results.find((item) => item.question_id === question.id);
                     return (
                       <div key={question.id} className={isDark ? "rounded-2xl bg-white/6 p-4" : "rounded-2xl bg-[var(--app-surface-muted)] p-4"}>
+                        <div className="mb-3">
+                          <TTSControls
+                            text={question.question_text}
+                            language={profile?.learning_language || lesson?.language}
+                            label="tts.readContent"
+                            t={t}
+                            isDark={isDark}
+                          />
+                        </div>
                         <p className="text-sm font-black">{question.sequence_order}. {question.question_text}</p>
                         {question.options.length ? (
                           <div className="mt-3 grid gap-2">
@@ -445,7 +497,18 @@ export default function LessonPlayerPage() {
                       {isSaving ? t("profile.saving") : t("assessment.next")}
                     </button>
                   ) : lesson.next_lesson ? (
-                    <button type="button" onClick={() => router.push(`/lessons/${lesson.next_lesson?.id}`)} disabled={!lesson.next_lesson.is_unlocked} className="rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!lesson.next_lesson?.is_unlocked) {
+                          setMessage(t("lesson.locked"));
+                          return;
+                        }
+                        router.push(`/lessons/${lesson.next_lesson.id}`);
+                      }}
+                      aria-disabled={!lesson.next_lesson.is_unlocked}
+                      className="rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-5 py-3 text-sm font-black text-white"
+                    >
                       {lesson.next_lesson.is_unlocked ? t("lesson.nextLesson") : t("lesson.nextLocked")}
                     </button>
                   ) : null}

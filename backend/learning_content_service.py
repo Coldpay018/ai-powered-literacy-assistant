@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
@@ -93,6 +94,191 @@ def get_published_course(db: Session, course_id: int) -> models.Course:
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     return course
+
+
+def ordered_course_lessons(course: models.Course) -> list[models.Lesson]:
+    ordered_modules = sorted(
+        [module for module in course.modules if module.is_published],
+        key=lambda module: (
+            module.sequence_order if module.sequence_order is not None else 0,
+            module.title or "",
+            module.id,
+        ),
+    )
+    flattened: list[models.Lesson] = []
+    for module in ordered_modules:
+        flattened.extend(
+            sorted(
+                [lesson for lesson in module.lessons if lesson.is_active and lesson.is_published],
+                key=lambda lesson: (
+                    lesson.sequence_order if lesson.sequence_order is not None else 0,
+                    lesson.title or "",
+                    lesson.id,
+                ),
+            )
+        )
+
+    standalone_lessons = sorted(
+        [
+            lesson
+            for lesson in course.lessons
+            if lesson.is_active and lesson.is_published and lesson.module_id is None
+        ],
+        key=lambda lesson: (
+            lesson.sequence_order if lesson.sequence_order is not None else 0,
+            lesson.title or "",
+            lesson.id,
+        ),
+    )
+    flattened.extend(standalone_lessons)
+    return flattened
+
+
+def progress_status_map(
+    db: Session,
+    user_id: int,
+    lessons: list[models.Lesson],
+) -> dict[int, models.LearnerProgress]:
+    lesson_ids = [lesson.id for lesson in lessons]
+    if not lesson_ids:
+        return {}
+    rows = (
+        db.query(models.LearnerProgress)
+        .filter(
+            models.LearnerProgress.user_id == user_id,
+            models.LearnerProgress.lesson_id.in_(lesson_ids),
+        )
+        .all()
+    )
+    return {row.lesson_id: row for row in rows}
+
+
+def sync_progress_metadata(progress: models.LearnerProgress, lesson: models.Lesson) -> None:
+    progress.course_id = lesson.course_id
+    progress.module_id = lesson.module_id
+    progress.current_difficulty = lesson.proficiency_level
+    progress.completion_status = progress.status
+
+
+def get_or_create_lesson_progress(
+    db: Session,
+    user_id: int,
+    lesson: models.Lesson,
+) -> models.LearnerProgress:
+    progress = (
+        db.query(models.LearnerProgress)
+        .filter(
+            models.LearnerProgress.user_id == user_id,
+            models.LearnerProgress.lesson_id == lesson.id,
+        )
+        .first()
+    )
+    if not progress:
+        progress = models.LearnerProgress(
+            user_id=user_id,
+            course_id=lesson.course_id,
+            module_id=lesson.module_id,
+            lesson_id=lesson.id,
+            completion_status="not_started",
+            status="not_started",
+            progress_percentage=0,
+            current_difficulty=lesson.proficiency_level,
+        )
+        db.add(progress)
+        db.flush()
+    sync_progress_metadata(progress, lesson)
+    return progress
+
+
+def is_lesson_unlocked(
+    lesson: models.Lesson,
+    ordered_lessons: list[models.Lesson],
+    progress_by_lesson: dict[int, models.LearnerProgress],
+) -> bool:
+    index = next((position for position, item in enumerate(ordered_lessons) if item.id == lesson.id), 0)
+    if index <= 0:
+        return True
+    current_progress = progress_by_lesson.get(lesson.id)
+    if current_progress and current_progress.status in {"in_progress", "completed"}:
+        return True
+    previous_lesson = ordered_lessons[index - 1]
+    previous_progress = progress_by_lesson.get(previous_lesson.id)
+    return previous_progress is not None and previous_progress.status == "completed"
+
+
+def first_unlocked_lesson(
+    ordered_lessons: list[models.Lesson],
+    progress_by_lesson: dict[int, models.LearnerProgress],
+) -> models.Lesson | None:
+    for lesson in ordered_lessons:
+        if is_lesson_unlocked(lesson, ordered_lessons, progress_by_lesson):
+            return lesson
+    return ordered_lessons[0] if ordered_lessons else None
+
+
+def repair_initial_unlock_state(
+    db: Session,
+    user_id: int,
+    ordered_lessons: list[models.Lesson],
+    progress_by_lesson: dict[int, models.LearnerProgress],
+) -> models.LearnerProgress | None:
+    if not ordered_lessons:
+        return None
+    if any(progress.status == "completed" for progress in progress_by_lesson.values()):
+        return None
+    first_lesson = ordered_lessons[0]
+    for lesson in ordered_lessons[1:]:
+        progress = progress_by_lesson.get(lesson.id)
+        if progress and progress.status in {"in_progress", "completed"}:
+            progress.status = "not_started"
+            progress.completion_status = "not_started"
+            progress.progress_percentage = 0
+            progress.started_at = None
+            progress.completed_at = None
+            db.add(progress)
+    progress = progress_by_lesson.get(first_lesson.id)
+    if progress is None:
+        progress = get_or_create_lesson_progress(db, user_id, first_lesson)
+        progress_by_lesson[first_lesson.id] = progress
+    else:
+        sync_progress_metadata(progress, first_lesson)
+        db.add(progress)
+    return progress
+
+
+def start_unlocked_lesson_progress(
+    db: Session,
+    user_id: int,
+    lesson: models.Lesson,
+) -> models.LearnerProgress:
+    progress = get_or_create_lesson_progress(db, user_id, lesson)
+    now = datetime.now(timezone.utc)
+    progress.last_accessed_at = now
+    if progress.status == "not_started":
+        progress.status = "in_progress"
+        progress.completion_status = "in_progress"
+        progress.started_at = progress.started_at or now
+        progress.progress_percentage = max(progress.progress_percentage, 1)
+    db.add(progress)
+    return progress
+
+
+def navigation_item(
+    lesson: models.Lesson | None,
+    ordered_lessons: list[models.Lesson],
+    progress_by_lesson: dict[int, models.LearnerProgress],
+) -> dict | None:
+    if lesson is None:
+        return None
+    progress = progress_by_lesson.get(lesson.id)
+    unlocked = is_lesson_unlocked(lesson, ordered_lessons, progress_by_lesson)
+    return {
+        "id": lesson.id,
+        "title": lesson.title,
+        "status": progress.status if progress else "not_started",
+        "is_unlocked": unlocked,
+        "locked": not unlocked,
+    }
 
 
 def list_published_modules(db: Session, course_id: int) -> list[models.CourseModule]:
@@ -307,42 +493,6 @@ def serialize_module_detail(module: models.CourseModule) -> dict:
     }
 
 
-def _ordered_course_lessons(course: models.Course) -> list[models.Lesson]:
-    ordered_lessons: list[models.Lesson] = []
-
-    modules = sorted(
-        [module for module in course.modules if module.is_published],
-        key=lambda module: (
-            module.sequence_order if module.sequence_order is not None else 0,
-            module.title or "",
-        ),
-    )
-    for module in modules:
-        module_lessons = sorted(
-            [lesson for lesson in module.lessons if lesson.is_active and lesson.is_published],
-            key=lambda lesson: (
-                lesson.sequence_order if lesson.sequence_order is not None else 0,
-                lesson.title or "",
-            ),
-        )
-        ordered_lessons.extend(module_lessons)
-
-    standalone_lessons = sorted(
-        [
-            lesson
-            for lesson in course.lessons
-            if lesson.is_active and lesson.is_published and lesson.module_id is None
-        ],
-        key=lambda lesson: (
-            lesson.sequence_order if lesson.sequence_order is not None else 0,
-            lesson.title or "",
-        ),
-    )
-    ordered_lessons.extend(standalone_lessons)
-
-    return ordered_lessons
-
-
 def serialize_course_detail(course: models.Course) -> dict:
     published_modules = [module for module in course.modules if module.is_published]
     return {
@@ -351,7 +501,7 @@ def serialize_course_detail(course: models.Course) -> dict:
             serialize_module_detail(module)
             for module in sorted(published_modules, key=lambda item: item.sequence_order)
         ],
-        "lessons": [serialize_lesson_summary(lesson) for lesson in _ordered_course_lessons(course)],
+        "lessons": [serialize_lesson_summary(lesson) for lesson in ordered_course_lessons(course)],
         "created_at": course.created_at,
         "updated_at": course.updated_at,
     }

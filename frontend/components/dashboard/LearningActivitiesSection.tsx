@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { LiteracyIcon, type LiteracyIconName } from "@/components/ui/LiteracyIllustrations";
+import type { TranslationKey } from "@/lib/i18n/translations";
 import type { DashboardPrototypeData, Translate } from "./types";
 
 type Category = "all" | "reading" | "writing" | "vocabulary" | "comprehension";
@@ -11,14 +12,16 @@ type LearningActivitiesSectionProps = {
   isDark: boolean;
   t: Translate;
   onPrototypeAction: (label: string) => void;
+  onFlashcards: () => void;
+  onPuzzles: () => void;
 };
 
-const categories: Array<{ id: Category; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "reading", label: "Reading" },
-  { id: "writing", label: "Writing" },
-  { id: "vocabulary", label: "Vocabulary" },
-  { id: "comprehension", label: "Comprehension" },
+const categories: Array<{ id: Category; labelKey: TranslationKey }> = [
+  { id: "all", labelKey: "dashboard.category.all" },
+  { id: "reading", labelKey: "dashboard.category.reading" },
+  { id: "writing", labelKey: "dashboard.category.writing" },
+  { id: "vocabulary", labelKey: "dashboard.category.vocabulary" },
+  { id: "comprehension", labelKey: "dashboard.category.comprehension" },
 ];
 
 const categoryIcons: Record<Exclude<Category, "all">, LiteracyIconName> = {
@@ -33,6 +36,8 @@ export function LearningActivitiesSection({
   isDark,
   t,
   onPrototypeAction,
+  onFlashcards,
+  onPuzzles,
 }: LearningActivitiesSectionProps) {
   const [category, setCategory] = useState<Category>("all");
   const filteredActivities = useMemo(
@@ -69,7 +74,7 @@ export function LearningActivitiesSection({
                   : "bg-[var(--app-surface)] text-[#667085] ring-1 ring-[var(--app-border)] hover:text-[#172033]"
             }`}
           >
-            {item.label}
+            {t(item.labelKey)}
           </button>
         ))}
       </div>
@@ -82,7 +87,7 @@ export function LearningActivitiesSection({
                 <LiteracyIcon name={categoryIcons[activity.category]} className="h-10 w-10" />
               </span>
               <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-muted)] px-3 py-1 text-xs font-black text-[#0F766E]"}>
-                {activity.category}
+                {t(`dashboard.category.${activity.category}` as TranslationKey)}
               </span>
             </div>
             <h2 className="text-xl font-black tracking-normal">{t(activity.titleKey)}</h2>
@@ -94,15 +99,27 @@ export function LearningActivitiesSection({
                 {t(activity.difficultyKey)}
               </span>
               <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-xs font-black text-[#667085]"}>
-                {activity.duration}
+                {t("dashboard.durationMinutes", { minutes: activity.durationMinutes })}
               </span>
-              <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-xs font-black text-[#667085]"}>
-                {t("common.prototypeData")}
-              </span>
+              {activity.action === "flashcards" || activity.action === "puzzles" ? null : (
+                <span className={isDark ? "rounded-full bg-white/8 px-3 py-1 text-xs font-black text-teal-50/72" : "rounded-full bg-[var(--app-surface-soft)] px-3 py-1 text-xs font-black text-[#667085]"}>
+                  {t("common.prototypeData")}
+                </span>
+              )}
             </div>
             <button
               type="button"
-              onClick={() => onPrototypeAction(t(activity.titleKey))}
+              onClick={() => {
+                if (activity.action === "flashcards") {
+                  onFlashcards();
+                  return;
+                }
+                if (activity.action === "puzzles") {
+                  onPuzzles();
+                  return;
+                }
+                onPrototypeAction(t(activity.titleKey));
+              }}
               className="group mt-6 rounded-2xl bg-gradient-to-r from-[#0F766E] to-[#14B8A6] px-4 py-3 text-sm font-black text-white transition hover:brightness-105"
             >
               {t("dashboard.start")} <span className="odyssey-button-arrow inline-block">-&gt;</span>

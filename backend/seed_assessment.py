@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 import models
+from assessment_question_utils import build_ordered_word_tiles, build_word_tiles, ordered_words_match_sentence, word_tiles_match_sentence
 from question_taxonomy import (
     normalize_experience_level,
 )
@@ -138,6 +139,58 @@ LANGUAGE_CONTENT = {
             ("మీ పాఠశాల గురించి రెండు వాక్యాలు రాయండి.", ["పాఠశాల", "ఉపాధ్యాయుడు", "తరగతి", "నేర్చు"]),
         ],
     },
+    "kn": {
+        "title": "ಪ್ರಾರಂಭಿಕ ಸಾಕ್ಷರತಾ ಮೌಲ್ಯಮಾಪನ",
+        "words": ["ಪುಸ್ತಕ", "ನದಿ", "ಶಾಲೆ", "ಮಾರುಕಟ್ಟೆ", "ತೋಟ", "ಪತ್ರ", "ಕುಟುಂಬ", "ಬೆಳಗ್ಗೆ"],
+        "sentences": [
+            "ರವಿ ಪ್ರತಿ ಬೆಳಿಗ್ಗೆ ಪುಸ್ತಕ ಓದುತ್ತಾನೆ.",
+            "ಮಗು ಪೆನ್ಸಿಲ್ ಅನ್ನು ಮೇಜಿನ ಮೇಲೆ ಇಡುತ್ತದೆ.",
+            "ಮೀನಾ ಚಿಕ್ಕ ಗಿಡಕ್ಕೆ ನೀರು ಹಾಕುತ್ತಾಳೆ.",
+            "ಬಸ್ ಶಾಲೆಯ ಹತ್ತಿರ ನಿಲ್ಲುತ್ತದೆ.",
+            "ಆಶಾ ತನ್ನ ಸ್ನೇಹಿತೆಗೆ ಪತ್ರ ಬರೆಯುತ್ತಾಳೆ.",
+        ],
+        "passages": [
+            ("ಮಾಯಾ ತನ್ನ ತಾಯಿಯೊಂದಿಗೆ ಮಾರುಕಟ್ಟೆಗೆ ಹೋಗುತ್ತಾಳೆ. ಅವರು ಅಕ್ಕಿ ಮತ್ತು ತಾಜಾ ತರಕಾರಿಗಳನ್ನು ಖರೀದಿಸುತ್ತಾರೆ.", "ಮಾಯಾ ಏನು ಖರೀದಿಸಿದಳು?", "ಅಕ್ಕಿ ಮತ್ತು ತರಕಾರಿಗಳು"),
+            ("ಒಂದು ಚಿಕ್ಕ ಹಕ್ಕಿ ಕಿಟಕಿಯ ಮೇಲೆ ಕುಳಿತುಕೊಳ್ಳುತ್ತದೆ. ಸೂರ್ಯ ಉದಯಿಸಿದಾಗ ಅದು ಹಾಡುತ್ತದೆ.", "ಹಕ್ಕಿ ಯಾವಾಗ ಹಾಡುತ್ತದೆ?", "ಸೂರ್ಯ ಉದಯಿಸಿದಾಗ"),
+            ("ಕಿರಣ್ ಓದಲು ಮೊದಲು ತನ್ನ ಮೇಜನ್ನು ಸ್ವಚ್ಛಗೊಳಿಸುತ್ತಾನೆ. ಅವನು ಪುಸ್ತಕಗಳನ್ನು ಸರಿಯಾಗಿ ಇಡುತ್ತಾನೆ.", "ಕಿರಣ್ ಓದಲು ಮೊದಲು ಏನು ಮಾಡುತ್ತಾನೆ?", "ಮೇಜನ್ನು ಸ್ವಚ್ಛಗೊಳಿಸುತ್ತಾನೆ"),
+            ("ಲೀಲಾ ತನ್ನ ಕಥೆಪುಸ್ತಕವನ್ನು ತಮ್ಮನೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳುತ್ತಾಳೆ. ಅವರು ಎರಡು ಪುಟಗಳನ್ನು ಒಟ್ಟಿಗೆ ಓದುತ್ತಾರೆ.", "ಲೀಲಾ ಜೊತೆಗೆ ಯಾರು ಓದುತ್ತಾರೆ?", "ತಮ್ಮ"),
+            ("ಶಿಕ್ಷಕ ಫಲಕದ ಮೇಲೆ ಮೂರು ಹೊಸ ಪದಗಳನ್ನು ಬರೆಯುತ್ತಾರೆ. ತರಗತಿ ಅವನ್ನು ಜೋರಾಗಿ ಓದುತ್ತದೆ.", "ಪದಗಳನ್ನು ಎಲ್ಲಿಗೆ ಬರೆಯಲಾಗಿದೆ?", "ಫಲಕದ ಮೇಲೆ"),
+        ],
+        "typing": ["ನಾನು ಓದಲು ಸಾಧ್ಯ.", "ಸೂರ್ಯ ಪ್ರಕಾಶಮಾನವಾಗಿದೆ.", "ನನ್ನ ಶಾಲೆ ನನ್ನ ಮನೆಯ ಹತ್ತಿರ ಇದೆ.", "ನಾವು ಪ್ರತಿದಿನ ಹೊಸ ಪದಗಳನ್ನು ಕಲಿಯುತ್ತೇವೆ."],
+        "completion": [
+            ("ದಾಹವಾದಾಗ ನಾನು ____ ಕುಡಿಯುತ್ತೇನೆ.", ["ನೀರು"], ["ನೀರು"]),
+            ("ಪುಸ್ತಕದಲ್ಲಿ ಅನೇಕ ____ ಇರುತ್ತವೆ.", ["ಪುಟಗಳು"], ["ಪುಟಗಳು"]),
+            ("ನಾವು ____ ಬಳಸಿ ಬರೆಯುತ್ತೇವೆ.", ["ಪೆನ್", "ಪೆನ್ಸಿಲ್"], ["ಪೆನ್", "ಪೆನ್ಸಿಲ್"]),
+            ("ರಾತ್ರಿಯ ವಿರುದ್ಧ ಪದ ____.", ["ಹಗಲು"], ["ಹಗಲು"]),
+        ],
+        "short": [
+            ("ನಿಮ್ಮ ದಿನಚರಿಯ ಬಗ್ಗೆ ಎರಡು ವಾಕ್ಯಗಳನ್ನು ಬರೆಯಿರಿ.", ["ಬೆಳಗ್ಗೆ", "ಶಾಲೆ", "ಓದು", "ದಿನ"]),
+            ("ನಿಮ್ಮ ಕುಟುಂಬದ ಬಗ್ಗೆ ಎರಡು ವಾಕ್ಯಗಳನ್ನು ಬರೆಯಿರಿ.", ["ಕುಟುಂಬ", "ಮನೆ", "ತಾಯಿ", "ತಂದೆ"]),
+            ("ನಿಮಗೆ ಇಷ್ಟವಾದ ಚಟುವಟಿಕೆಯ ಬಗ್ಗೆ ಎರಡು ವಾಕ್ಯಗಳನ್ನು ಬರೆಯಿರಿ.", ["ಇಷ್ಟ", "ಆಟ", "ಓದು", "ಕಲಿ"]),
+            ("ನಿಮ್ಮ ಶಾಲೆಯ ಬಗ್ಗೆ ಎರಡು ವಾಕ್ಯಗಳನ್ನು ಬರೆಯಿರಿ.", ["ಶಾಲೆ", "ಶಿಕ್ಷಕ", "ತರಗತಿ", "ಕಲಿ"]),
+        ],
+        "voice": {
+            "spoken_answer_prompt": "ಕಲಿಯುವ ಸ್ಥಳದ ಪದವನ್ನು ಹೇಳಿ.",
+            "spoken_answer": "ಶಾಲೆ",
+            "spoken_fill_prompt": "ವಾಕ್ಯವನ್ನು ಮಾತನಾಡಿ ಪೂರ್ಣಗೊಳಿಸಿ.",
+            "spoken_fill_display": "ನಾನು ಓದಲು ____ ಹೋಗುತ್ತೇನೆ.",
+            "spoken_fill_reference": "ನಾನು ಓದಲು ಶಾಲೆಗೆ ಹೋಗುತ್ತೇನೆ.",
+            "reading_aloud_prompt": "ಈ ವಾಕ್ಯವನ್ನು ಜೋರಾಗಿ ಓದಿ.",
+            "reading_aloud_reference": "ರವಿ ಪ್ರತಿ ಬೆಳಿಗ್ಗೆ ಪುಸ್ತಕ ಓದುತ್ತಾನೆ.",
+            "sentence_repetition_prompt": "ವಾಕ್ಯವನ್ನು ಅದೇ ರೀತಿಯಾಗಿ ಮರುಕಳಿಸಿ.",
+            "sentence_repetition_reference": "ಮಗು ಪೆನ್ಸಿಲ್ ಅನ್ನು ಮೇಜಿನ ಮೇಲೆ ಇಡುತ್ತದೆ.",
+            "pronunciation_prompt": "ಈ ಪದವನ್ನು ಹೇಳಿ.",
+            "pronunciation_reference": "ಪುಸ್ತಕ",
+        },
+    },
+}
+
+REARRANGE_PROMPTS = {
+    "en": "Arrange the words to make a sentence.",
+    "hi": "शब्दों को सही क्रम में लगाकर वाक्य बनाइए।",
+    "ta": "சொற்களை சரியான வரிசையில் அமைத்து ஒரு வாக்கியத்தை உருவாக்கவும்.",
+    "te": "పదాలను సరైన క్రమంలో అమర్చి వాక్యం రూపొందించండి.",
+    "kn": "ಪದಗಳನ್ನು ಸರಿಯಾದ ಕ್ರಮದಲ್ಲಿ ಇಟ್ಟು ವಾಕ್ಯವನ್ನು ರಚಿಸಿ.",
 }
 
 
@@ -181,6 +234,7 @@ def _assessment_question_metadata(question: dict) -> dict:
         "literal comprehension": "reading",
         "passage comprehension": "reading",
         "copy accuracy": "writing",
+        "sentence rearrangement": "writing",
         "sentence completion": "grammar",
         "short response": "writing",
         "vocabulary": "vocabulary",
@@ -223,11 +277,15 @@ def _validate_option_question(question: dict):
     option_ids = [option.get("id") for option in options]
     if len(option_ids) != len(set(option_ids)):
         raise ValueError(f"{question['stable_key']} has duplicate option IDs")
+    if any(not isinstance(option.get("text"), str) or not option["text"].strip() for option in options if isinstance(option, dict)):
+        raise ValueError(f"{question['stable_key']} has empty option text")
 
     correct_option_id = question["correct"].get("correct_option_id")
     option_by_id = {option["id"]: option["text"] for option in options}
     if correct_option_id not in option_by_id:
         raise ValueError(f"{question['stable_key']} is missing its correct option")
+    if sum(1 for option in options if option.get("id") == correct_option_id) != 1:
+        raise ValueError(f"{question['stable_key']} must have exactly one correct option")
 
     prompt = question.get("prompt", "").strip()
     if not prompt:
@@ -242,6 +300,34 @@ def _validate_option_question(question: dict):
         answer_tokens = [token for token in correct_text.lower().split() if len(token) > 2]
         if answer_tokens and not any(token in passage.lower() for token in answer_tokens):
             raise ValueError(f"{question['stable_key']} answer is not supported by its passage")
+
+
+def _validate_sentence_tile_question(question: dict):
+    if question["question_type"] != "sentence_rearrange":
+        return
+
+    correct = question.get("correct", {})
+    reference_text = correct.get("reference_text") if isinstance(correct, dict) else None
+    if not isinstance(reference_text, str) or not reference_text.strip():
+        raise ValueError(f"{question['stable_key']} is missing its reference text")
+
+    prompt = question.get("prompt", "").strip()
+    if not prompt:
+        raise ValueError(f"{question['stable_key']} has an empty prompt")
+
+    if reference_text.strip() in prompt:
+        raise ValueError(f"{question['stable_key']} prompt reveals the complete correct answer")
+
+    tiles = build_word_tiles(reference_text)
+    if not word_tiles_match_sentence(tiles, reference_text):
+        raise ValueError(f"{question['stable_key']} word tiles do not match the reference sentence")
+
+    ordered_words = correct.get("ordered_words")
+    if not ordered_words:
+        correct["ordered_words"] = build_ordered_word_tiles(reference_text)
+        ordered_words = correct["ordered_words"]
+    if not ordered_words_match_sentence(ordered_words, reference_text):
+        raise ValueError(f"{question['stable_key']} ordered words do not reconstruct the reference sentence")
 
 
 def _question_payload(question: dict):
@@ -286,6 +372,17 @@ def build_question_bank():
             "Choose the word that means a group of related people living together.",
             "Choose the word for the early part of the day.",
         ]
+        if language == "kn":
+            word_meaning_prompts = [
+                "ಜನರು ಓದುವ ವಸ್ತುವಿನ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ಹರಿಯುವ ನೀರಿನ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ಕಲಿಯುವ ಸ್ಥಳದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ಜನರು ವಸ್ತುಗಳನ್ನು ಖರೀದಿಸುವ ಸ್ಥಳದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ಗಿಡಗಳಿರುವ ಸ್ಥಳದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ಬರೆದ ಸಂದೇಶದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ಸಂಬಂಧಿಕರು ಜೊತೆಯಾಗಿ ಇರುವ ಗುಂಪಿನ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+                "ದಿನದ ಆರಂಭದ ಭಾಗದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
+            ]
 
         for index in range(5):
             correct = words[index]
@@ -347,6 +444,156 @@ def build_question_bank():
                 "skill_tag": "copy accuracy",
             })
 
+        voice_questions = [
+            {
+                "stable_key": f"{language}-typing-voice-spoken-answer-1",
+                "question_type": "spoken_answer",
+                "prompt": "Say the word for a place to learn." if language == "en" else "पढ़ने की जगह का नाम बोलिए।",
+                "correct": {"accepted_answers": ["school" if language == "en" else "स्कूल"]},
+                "marks": 4,
+                "skill_tag": "short response",
+                "difficulty": "beginner",
+                "reference_text": "school" if language == "en" else "स्कूल",
+            },
+            {
+                "stable_key": f"{language}-typing-voice-spoken-fill-blank-1",
+                "question_type": "spoken_fill_blank",
+                "prompt": "Complete the sentence by speaking." if language == "en" else "वाक्य को बोलकर पूरा कीजिए।",
+                "correct": {
+                    "display_text": "I go to ____ to read." if language == "en" else "मैं पढ़ने के लिए ____ जाता हूँ।",
+                    "accepted_answers": ["school" if language == "en" else "स्कूल"],
+                    "reference_text": "I go to school to read." if language == "en" else "मैं पढ़ने के लिए स्कूल जाता हूँ।",
+                },
+                "marks": 5,
+                "skill_tag": "copy accuracy",
+                "difficulty": "beginner",
+                "reference_text": "I go to school to read." if language == "en" else "मैं पढ़ने के लिए स्कूल जाता हूँ।",
+            },
+            {
+                "stable_key": f"{language}-typing-voice-reading-aloud-1",
+                "question_type": "reading_aloud",
+                "prompt": "Read this sentence aloud." if language == "en" else "इस वाक्य को ज़ोर से पढ़िए।",
+                "correct": {
+                    "reference_text": "Ravi reads a book every morning." if language == "en" else "रवि हर सुबह किताब पढ़ता है।",
+                },
+                "marks": 5,
+                "skill_tag": "copy accuracy",
+                "difficulty": "beginner",
+                "reference_text": "Ravi reads a book every morning." if language == "en" else "रवि हर सुबह किताब पढ़ता है।",
+            },
+            {
+                "stable_key": f"{language}-typing-voice-sentence-repetition-1",
+                "question_type": "sentence_repetition",
+                "prompt": "Repeat the sentence exactly." if language == "en" else "वाक्य को ठीक उसी तरह दोहराइए।",
+                "correct": {
+                    "reference_text": "The child keeps the pencil on the table." if language == "en" else "बच्चा पेंसिल मेज पर रखता है।",
+                    "case_sensitive": False,
+                    "allow_terminal_punctuation": True,
+                },
+                "marks": 5,
+                "skill_tag": "copy accuracy",
+                "difficulty": "beginner",
+                "reference_text": "The child keeps the pencil on the table." if language == "en" else "बच्चा पेंसिल मेज पर रखता है।",
+            },
+            {
+                "stable_key": f"{language}-typing-voice-pronunciation-1",
+                "question_type": "pronunciation",
+                "prompt": "Say this word aloud." if language == "en" else "इस शब्द को बोलिए।",
+                "correct": {"reference_text": "book" if language == "en" else "किताब"},
+                "marks": 3,
+                "skill_tag": "short response",
+                "difficulty": "beginner",
+                "reference_text": "book" if language == "en" else "किताब",
+            },
+        ]
+        if language == "kn":
+            voice = content["voice"]
+            voice_questions = [
+                {
+                    "stable_key": f"{language}-typing-voice-spoken-answer-1",
+                    "question_type": "spoken_answer",
+                    "prompt": voice["spoken_answer_prompt"],
+                    "correct": {"accepted_answers": [voice["spoken_answer"]]},
+                    "marks": 4,
+                    "skill_tag": "short response",
+                    "difficulty": "beginner",
+                },
+                {
+                    "stable_key": f"{language}-typing-voice-spoken-fill-blank-1",
+                    "question_type": "spoken_fill_blank",
+                    "prompt": voice["spoken_fill_prompt"],
+                    "correct": {
+                        "display_text": voice["spoken_fill_display"],
+                        "accepted_answers": [voice["spoken_answer"]],
+                        "reference_text": voice["spoken_fill_reference"],
+                    },
+                    "marks": 5,
+                    "skill_tag": "copy accuracy",
+                    "difficulty": "beginner",
+                },
+                {
+                    "stable_key": f"{language}-typing-voice-reading-aloud-1",
+                    "question_type": "reading_aloud",
+                    "prompt": voice["reading_aloud_prompt"],
+                    "correct": {"reference_text": voice["reading_aloud_reference"]},
+                    "marks": 5,
+                    "skill_tag": "copy accuracy",
+                    "difficulty": "beginner",
+                },
+                {
+                    "stable_key": f"{language}-typing-voice-sentence-repetition-1",
+                    "question_type": "sentence_repetition",
+                    "prompt": voice["sentence_repetition_prompt"],
+                    "correct": {
+                        "reference_text": voice["sentence_repetition_reference"],
+                        "case_sensitive": False,
+                        "allow_terminal_punctuation": True,
+                    },
+                    "marks": 5,
+                    "skill_tag": "copy accuracy",
+                    "difficulty": "beginner",
+                },
+                {
+                    "stable_key": f"{language}-typing-voice-pronunciation-1",
+                    "question_type": "pronunciation",
+                    "prompt": voice["pronunciation_prompt"],
+                    "correct": {"reference_text": voice["pronunciation_reference"]},
+                    "marks": 3,
+                    "skill_tag": "short response",
+                    "difficulty": "beginner",
+                },
+            ]
+
+        for item in voice_questions:
+            bank.append({
+                "stable_key": item["stable_key"],
+                "language": language,
+                "section": "typing",
+                "difficulty": item["difficulty"],
+                "question_type": item["question_type"],
+                "prompt": item["prompt"],
+                "correct": item["correct"],
+                "marks": item["marks"],
+                "skill_tag": item["skill_tag"],
+            })
+
+        for index, sentence in enumerate(sentences[:4]):
+            bank.append({
+                "stable_key": f"{language}-typing-rearrange-{index + 1}",
+                "language": language,
+                "section": "typing",
+                "difficulty": "beginner",
+                "question_type": "sentence_rearrange",
+                "prompt": REARRANGE_PROMPTS[language],
+                "correct": {
+                    "reference_text": sentence,
+                    "case_sensitive": False,
+                    "allow_terminal_punctuation": True,
+                },
+                "marks": 5,
+                "skill_tag": "sentence rearrangement",
+            })
+
         for index, (prompt, accepted, keywords) in enumerate(content["completion"]):
             bank.append({
                 "stable_key": f"{language}-typing-intermediate-{index + 1}",
@@ -383,6 +630,17 @@ def build_question_bank():
             ("Choose the word for flowing water.", 1),
             ("Choose the word for a place where people buy things.", 3),
         ]
+        if language == "kn":
+            mcq_items = [
+                ("ಕಲಿಯುವ ಸ್ಥಳದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 2),
+                ("ಸಂಬಂಧಿಕರು ಜೊತೆಯಾಗಿ ಇರುವ ಗುಂಪಿನ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 6),
+                ("ಓದಲು ಬಳಸುವ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 0),
+                ("ದಿನದ ಆರಂಭದ ಭಾಗದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 7),
+                ("ಬರೆದ ಸಂದೇಶದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 5),
+                ("ಗಿಡಗಳಿರುವ ಸ್ಥಳದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 4),
+                ("ಹರಿಯುವ ನೀರಿನ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 1),
+                ("ಜನರು ವಸ್ತುಗಳನ್ನು ಖರೀದಿಸುವ ಸ್ಥಳದ ಪದವನ್ನು ಆಯ್ಕೆಮಾಡಿ.", 3),
+            ]
         for index, (prompt, correct_index) in enumerate(mcq_items):
             localized_correct = words[correct_index]
             distractors = [word for word_index, word in enumerate(words) if word_index != correct_index]
@@ -406,7 +664,7 @@ def build_question_bank():
                 "section": "mcq",
                 "difficulty": "intermediate",
                 "question_type": "mcq",
-                "prompt": "Choose the complete sentence.",
+                "prompt": "ಪೂರ್ಣ ವಾಕ್ಯವನ್ನು ಆಯ್ಕೆಮಾಡಿ." if language == "kn" else "Choose the complete sentence.",
                 "options": _options(sentences[index % len(sentences)], _sentence_distractors(sentences[index % len(sentences)])),
                 "correct": {"correct_option_id": "option_1"},
                 "marks": 3,
@@ -431,6 +689,7 @@ def build_question_bank():
     for question in bank:
         question.update(_assessment_question_metadata(question))
         _validate_option_question(question)
+        _validate_sentence_tile_question(question)
     return bank
 
 
